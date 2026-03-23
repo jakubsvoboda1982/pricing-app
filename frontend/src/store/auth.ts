@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import { User } from '@/types'
 import { apiClient } from '@/api/client'
 
@@ -14,8 +13,7 @@ interface AuthStore {
 }
 
 export const useAuthStore = create<AuthStore>(
-  persist(
-    (set) => ({
+  (set) => ({
       user: null,
       token: null,
       isAuthenticated: false,
@@ -50,9 +48,5 @@ export const useAuthStore = create<AuthStore>(
       setUser: (user: User | null) => {
         set({ user })
       },
-    }),
-    {
-      name: 'auth-store',
-    }
-  )
+    })
 )
