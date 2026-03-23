@@ -106,6 +106,23 @@ export class APIClient {
   async getAnalytics(productId: string) {
     return this.request('GET', `/analytics/${productId}`)
   }
+
+  // Users
+  async getUsers() {
+    return this.request('GET', '/users')
+  }
+
+  async createUser(data: any) {
+    return this.request('POST', '/users', data)
+  }
+
+  async deleteUser(id: string) {
+    return this.request('DELETE', `/users/${id}`)
+  }
+
+  async updateUserRole(id: string, role: string) {
+    return this.request('PUT', `/users/${id}`, { role })
+  }
 }
 
 export const apiClient = new APIClient()
