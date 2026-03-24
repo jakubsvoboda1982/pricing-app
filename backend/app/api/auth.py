@@ -4,7 +4,7 @@ from app.database import get_db
 from app.schemas.auth import UserLogin, UserRegister, TokenResponse, UserResponse
 from app.models import User, Company, LoginAttempt
 from app.utils.password import hash_password, verify_password
-from app.middleware.auth import create_access_token
+from app.middleware.auth import create_access_token, verify_token
 from datetime import timedelta
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -77,7 +77,16 @@ def login(credentials: UserLogin, request: Request, db: Session = Depends(get_db
     return TokenResponse(access_token=access_token)
 
 @router.get("/me", response_model=UserResponse)
-def get_current_user(current_user: dict = Depends(lambda: None), db: Session = Depends(get_db)):
+def get_current_user(payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
     """Get current authenticated user"""
-    # This needs proper auth dependency
-    return {"id": "test", "email": "test@test.com", "full_name": "Test", "role": "admin", "is_active": True}
+    user_id = payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return UserResponse(
+        id=str(user.id),
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
+        is_active=user.is_active,
+    )

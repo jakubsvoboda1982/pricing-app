@@ -8,8 +8,9 @@ import uuid
 
 from app.database import get_db
 from app.models import User, LoginAttempt
-from app.models.user import RoleEnum
 from app.middleware.auth import verify_token
+
+VALID_ROLES = ["admin", "pricing_manager", "category_manager", "read_only"]
 from app.utils.password import hash_password
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -24,7 +25,7 @@ def require_admin(
     user = db.query(User).filter(User.id == uuid.UUID(user_id)).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    if user.role != RoleEnum.ADMIN:
+    if user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user
 
@@ -141,7 +142,7 @@ def list_users(
             id=str(u.id),
             email=u.email,
             full_name=u.full_name,
-            role=u.role.value if u.role else "read_only",
+            role=u.role or "read_only",
             is_active=u.is_active,
             company_id=str(u.company_id),
             created_at=u.created_at,
@@ -162,19 +163,17 @@ def create_user(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
     # Validate role
-    try:
-        role = RoleEnum(user_data.role)
-    except ValueError:
+    if user_data.role not in VALID_ROLES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid role. Must be one of: {[r.value for r in RoleEnum]}",
+            detail=f"Invalid role. Must be one of: {VALID_ROLES}",
         )
 
     user = User(
         email=user_data.email,
         hashed_password=hash_password(user_data.password),
         full_name=user_data.full_name,
-        role=role,
+        role=user_data.role,
         company_id=uuid.UUID(user_data.company_id),
     )
     db.add(user)
@@ -185,7 +184,7 @@ def create_user(
         id=str(user.id),
         email=user.email,
         full_name=user.full_name,
-        role=user.role.value,
+        role=user.role,
         is_active=user.is_active,
         company_id=str(user.company_id),
         created_at=user.created_at,
@@ -205,13 +204,12 @@ def update_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     if update_data.role is not None:
-        try:
-            user.role = RoleEnum(update_data.role)
-        except ValueError:
+        if update_data.role not in VALID_ROLES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid role. Must be one of: {[r.value for r in RoleEnum]}",
+                detail=f"Invalid role. Must be one of: {VALID_ROLES}",
             )
+        user.role = update_data.role
 
     if update_data.is_active is not None:
         user.is_active = update_data.is_active
@@ -223,7 +221,7 @@ def update_user(
         id=str(user.id),
         email=user.email,
         full_name=user.full_name,
-        role=user.role.value,
+        role=user.role,
         is_active=user.is_active,
         company_id=str(user.company_id),
         created_at=user.created_at,
