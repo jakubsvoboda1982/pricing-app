@@ -6,47 +6,74 @@ interface AuthStore {
   user: User | null
   token: string | null
   isAuthenticated: boolean
+  isLoading: boolean
   login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string, full_name: string, company_name: string) => Promise<void>
   logout: () => void
   setUser: (user: User | null) => void
+  checkAuth: () => Promise<void>
 }
 
 export const useAuthStore = create<AuthStore>(
   (set) => ({
-      user: null,
-      token: null,
-      isAuthenticated: false,
+    user: null,
+    token: localStorage.getItem('access_token'),
+    isAuthenticated: false,
+    isLoading: true,
 
-      login: async (email: string, password: string) => {
-        const response = await apiClient.login(email, password)
-        apiClient.setToken(response.access_token)
+    login: async (email: string, password: string) => {
+      const response = await apiClient.login(email, password)
+      const token = response.access_token
+      localStorage.setItem('access_token', token)
+      apiClient.setToken(token)
+
+      const user = await apiClient.getCurrentUser()
+      set({
+        token,
+        user,
+        isAuthenticated: true,
+      })
+    },
+
+    logout: () => {
+      localStorage.removeItem('access_token')
+      apiClient.clearToken()
+      set({
+        user: null,
+        token: null,
+        isAuthenticated: false,
+      })
+    },
+
+    setUser: (user: User | null) => {
+      set({ user })
+    },
+
+    checkAuth: async () => {
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        set({ user: null, token: null, isAuthenticated: false, isLoading: false })
+        return
+      }
+
+      apiClient.setToken(token)
+      try {
+        const user = await apiClient.getCurrentUser()
         set({
-          token: response.access_token,
+          user,
+          token,
           isAuthenticated: true,
+          isLoading: false,
         })
-      },
-
-      register: async (email: string, password: string, full_name: string, company_name: string) => {
-        const response = await apiClient.register(email, password, full_name, company_name)
-        apiClient.setToken(response.access_token)
-        set({
-          token: response.access_token,
-          isAuthenticated: true,
-        })
-      },
-
-      logout: () => {
+      } catch {
+        localStorage.removeItem('access_token')
         apiClient.clearToken()
         set({
           user: null,
           token: null,
           isAuthenticated: false,
+          isLoading: false,
         })
-      },
-
-      setUser: (user: User | null) => {
-        set({ user })
-      },
-    })
+      }
+    },
+  })
 )

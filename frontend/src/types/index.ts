@@ -46,3 +46,13 @@ export interface Analytics {
   category_rank?: number
   updated_at: string
 }
+
+export interface LoginAttempt {
+  id: string
+  email: string
+  ip_address: string | null
+  user_agent: string | null
+  success: boolean
+  timestamp: string
+  error_message: string | null
+}

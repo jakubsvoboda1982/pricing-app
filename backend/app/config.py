@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
-        "postgresql://user:password@localhost:5432/pricing_db"
+        "postgresql://user:password@localhost:5432/pricing_db?sslmode=prefer"
     )
 
     # JWT

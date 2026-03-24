@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
-import { Menu, LogOut, BarChart3, Package, Users, AlertCircle, Download, Upload, Menu as MenuIcon } from 'lucide-react'
+import { Menu, LogOut, BarChart3, Package, Users, AlertCircle, Download, Upload, Menu as MenuIcon, Shield } from 'lucide-react'
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const navigate = useNavigate()
   const location = useLocation()
-  const { logout } = useAuthStore()
+  const { logout, user } = useAuthStore()
 
   const handleLogout = () => {
     logout()
@@ -21,9 +21,12 @@ export default function Layout() {
     { id: 'import', label: 'Import produktů', icon: Upload, path: '/import' },
     { id: 'export', label: 'Export centrum', icon: Download, path: '/export' },
     { id: 'audit', label: 'Auditní záznam', icon: AlertCircle, path: '/audit' },
+    ...(user?.role === 'admin'
+      ? [{ id: 'admin', label: 'Administrace', icon: Shield, path: '/admin' }]
+      : []),
   ]
 
-  const isActive = (path: string) => location.pathname === path
+  const isActive = (path: string) => location.pathname === path || location.pathname.startsWith(path + '/')
 
   return (
     <div className="flex h-screen bg-gray-50">

@@ -123,6 +123,37 @@ export class APIClient {
   async updateUserRole(id: string, role: string) {
     return this.request('PUT', `/users/${id}`, { role })
   }
+
+  // Admin
+  async getLoginAttempts(params?: { email?: string; days?: number; page?: number; per_page?: number }) {
+    const searchParams = new URLSearchParams()
+    if (params?.email) searchParams.set('email', params.email)
+    if (params?.days) searchParams.set('days', String(params.days))
+    if (params?.page) searchParams.set('page', String(params.page))
+    if (params?.per_page) searchParams.set('per_page', String(params.per_page))
+    const qs = searchParams.toString()
+    return this.request('GET', `/admin/login-attempts${qs ? `?${qs}` : ''}`)
+  }
+
+  async deleteLoginAttempt(id: string) {
+    return this.request('DELETE', `/admin/login-attempts/${id}`)
+  }
+
+  async getAdminUsers() {
+    return this.request('GET', '/admin/users')
+  }
+
+  async createAdminUser(data: { email: string; password: string; full_name: string; role: string }) {
+    return this.request('POST', '/admin/users', data)
+  }
+
+  async updateAdminUser(id: string, data: { role?: string; is_active?: boolean; full_name?: string }) {
+    return this.request('PUT', `/admin/users/${id}`, data)
+  }
+
+  async deleteAdminUser(id: string) {
+    return this.request('DELETE', `/admin/users/${id}`)
+  }
 }
 
 export const apiClient = new APIClient()

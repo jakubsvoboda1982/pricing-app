@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.auth import UserLogin, UserRegister, TokenResponse, UserResponse
-from app.models import User, Company
+from app.models import User, Company, LoginAttempt
 from app.utils.password import hash_password, verify_password
 from app.middleware.auth import create_access_token
 from datetime import timedelta
@@ -43,10 +43,33 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
     return TokenResponse(access_token=access_token)
 
 @router.post("/login", response_model=TokenResponse)
-def login(credentials: UserLogin, db: Session = Depends(get_db)):
+def login(credentials: UserLogin, request: Request, db: Session = Depends(get_db)):
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+
     user = db.query(User).filter(User.email == credentials.email).first()
     if not user or not verify_password(credentials.password, user.hashed_password):
+        # Record failed login attempt
+        attempt = LoginAttempt(
+            email=credentials.email,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            success=False,
+            error_message="Invalid credentials",
+        )
+        db.add(attempt)
+        db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    # Record successful login attempt
+    attempt = LoginAttempt(
+        email=credentials.email,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        success=True,
+    )
+    db.add(attempt)
+    db.commit()
 
     access_token = create_access_token(
         data={"sub": str(user.id), "email": user.email}
