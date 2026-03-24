@@ -5,14 +5,14 @@ WORKDIR /app
 # Upgrade pip
 RUN pip install --upgrade pip
 
-# Install Python dependencies
+# Copy and install dependencies
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code
-COPY backend ./backend
+# Copy backend code to /app
+COPY backend ./
 
 EXPOSE 8000
 
 # Run the app
-CMD ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
