@@ -4,5 +4,8 @@
   "devCommand": "npm run dev",
   "env": {
     "VITE_API_URL": "https://api.jacobsvoboda.cz"
-  }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/" }
+  ]
 }
