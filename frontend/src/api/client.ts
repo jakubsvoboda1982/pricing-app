@@ -154,6 +154,49 @@ export class APIClient {
   async deleteAdminUser(id: string) {
     return this.request('DELETE', `/admin/users/${id}`)
   }
+
+  // Competitors
+  async getCompetitors(category?: string) {
+    const params = new URLSearchParams()
+    if (category) params.set('category', category)
+    const qs = params.toString()
+    return this.request('GET', `/competitors${qs ? `?${qs}` : ''}`)
+  }
+
+  async addCompetitor(url: string) {
+    return this.request('POST', '/competitors', { url })
+  }
+
+  async getCompetitor(id: string) {
+    return this.request('GET', `/competitors/${id}`)
+  }
+
+  async updateCompetitor(id: string, data: any) {
+    return this.request('PUT', `/competitors/${id}`, data)
+  }
+
+  async deleteCompetitor(id: string) {
+    return this.request('DELETE', `/competitors/${id}`)
+  }
+
+  async rescapeCompetitor(id: string) {
+    return this.request('POST', `/competitors/${id}/rescrape`)
+  }
+
+  async getCompetitorPrices(id: string, daysBack: number = 30) {
+    return this.request('GET', `/competitors/${id}/prices?days_back=${daysBack}`)
+  }
+
+  async getCompetitorAlerts(competitorId?: string) {
+    const params = new URLSearchParams()
+    if (competitorId) params.set('competitor_id', competitorId)
+    const qs = params.toString()
+    return this.request('GET', `/competitors/alerts${qs ? `?${qs}` : ''}`)
+  }
+
+  async dismissAlert(alertId: string) {
+    return this.request('PUT', `/competitors/alerts/${alertId}/dismiss`)
+  }
 }
 
 export const apiClient = new APIClient()

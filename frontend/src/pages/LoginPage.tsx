@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
+import { ArrowRight } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -40,63 +41,121 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
-        <h1 className="text-3xl font-bold text-center mb-2 text-gray-900">Pricing Manager</h1>
-        <p className="text-center text-gray-600 mb-8">Přihlaste se ke svému účtu</p>
+    <div className="min-h-screen flex">
+      {/* Left Side - Branding */}
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white flex-col justify-between p-12">
+        <div>
+          <h1 className="text-4xl font-bold mb-2">Nutles</h1>
+          <p className="text-slate-300">Growth Copilot</p>
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="space-y-8">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-              Email
-            </label>
-            <input
-              type="email"
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="vas@email.cz"
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-              Heslo
-            </label>
-            <input
-              type="password"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="••••••••"
-              required
-            />
-          </div>
-
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
-              {error}
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+                <ArrowRight size={24} />
+              </div>
+              <h3 className="text-xl font-semibold">Inteligentní pricing</h3>
             </div>
-          )}
+            <p className="text-slate-300">Optimalizujte ceny na základě dat a trendů trhu</p>
+          </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition disabled:opacity-50 flex items-center justify-center"
-          >
-            {loading ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                Přihlašování...
-              </>
-            ) : (
-              'Přihlásit se'
+          <div>
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+                <ArrowRight size={24} />
+              </div>
+              <h3 className="text-xl font-semibold">Analýza konkurence</h3>
+            </div>
+            <p className="text-slate-300">Sledujte ceny konkurentů v reálném čase</p>
+          </div>
+
+          <div>
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+                <ArrowRight size={24} />
+              </div>
+              <h3 className="text-xl font-semibold">Sezónní strategie</h3>
+            </div>
+            <p className="text-slate-300">Plánujte prodej podle sezónních trendů</p>
+          </div>
+        </div>
+
+        <p className="text-slate-400 text-sm">© 2026 Nutles Growth Copilot. All rights reserved.</p>
+      </div>
+
+      {/* Right Side - Login Form */}
+      <div className="w-full lg:w-1/2 bg-white flex items-center justify-center p-8">
+        <div className="w-full max-w-md">
+          {/* Mobile Branding */}
+          <div className="lg:hidden mb-8">
+            <h1 className="text-3xl font-bold text-gray-900">Nutles</h1>
+            <p className="text-gray-600">Growth Copilot</p>
+          </div>
+
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Přihlaste se</h2>
+          <p className="text-gray-600 mb-8">Přihlaste se ke svému účtu pro správu produktů</p>
+
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+                Email
+              </label>
+              <input
+                type="email"
+                id="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                placeholder="vas@email.cz"
+                required
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+                Heslo
+              </label>
+              <input
+                type="password"
+                id="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                placeholder="••••••••"
+                required
+              />
+            </div>
+
+            {error && (
+              <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+                {error}
+              </div>
             )}
-          </button>
-        </form>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition disabled:opacity-50 flex items-center justify-center space-x-2"
+            >
+              {loading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Přihlašování...</span>
+                </>
+              ) : (
+                <>
+                  <span>Přihlásit se</span>
+                  <ArrowRight size={18} />
+                </>
+              )}
+            </button>
+          </form>
+
+          <p className="text-center text-gray-600 text-sm mt-8">
+            Potřebujete pomoc? Kontaktujte <a href="mailto:support@nutles.cz" className="text-blue-600 hover:underline">podporu</a>
+          </p>
+        </div>
       </div>
     </div>
   )

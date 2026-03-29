@@ -34,23 +34,26 @@ export default function ImportPage() {
       const formData = new FormData()
       formData.append('file', file)
 
-      const response = await fetch('/api/import/products', {
+      // Import do katalogu produktů
+      const response = await fetch('http://localhost:8000/api/catalog/import', {
         method: 'POST',
         body: formData,
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
-        },
       })
 
       if (response.ok) {
         const data = await response.json()
-        setResult({ success: true, message: data.message, count: data.count })
+        setResult({
+          success: true,
+          message: `Import úspěšný! Importováno ${data.imported} produktů.${data.skipped > 0 ? ` Přeskočeno ${data.skipped}.` : ''}`,
+          count: data.imported,
+        })
         setFile(null)
       } else {
-        setResult({ success: false, message: 'Chyba při importu' })
+        const error = await response.json()
+        setResult({ success: false, message: error.detail || 'Chyba při importu' })
       }
     } catch (error) {
-      setResult({ success: false, message: 'Chyba při importu' })
+      setResult({ success: false, message: 'Chyba při importu souboru' })
     } finally {
       setImporting(false)
     }

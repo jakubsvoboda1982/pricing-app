@@ -13,6 +13,11 @@ import ImportPage from './pages/ImportPage'
 import ExportPage from './pages/ExportPage'
 import LoginAttemptsPage from './pages/LoginAttemptsPage'
 import UsersManagementPage from './pages/UsersManagementPage'
+import OpportunitiesPage from './pages/OpportunitiesPage'
+import SimulatorPage from './pages/SimulatorPage'
+import SeasonalityPage from './pages/SeasonalityPage'
+import CatalogPage from './pages/CatalogPage'
+import CompetitorsPage from './pages/CompetitorsPage'
 import { useAuthStore } from './store/auth'
 
 const queryClient = new QueryClient()
@@ -36,6 +41,11 @@ function AppRoutes() {
       >
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/products" element={<ProductsPage />} />
+        <Route path="/catalog" element={<CatalogPage />} />
+        <Route path="/competitors" element={<CompetitorsPage />} />
+        <Route path="/opportunities" element={<OpportunitiesPage />} />
+        <Route path="/simulator" element={<SimulatorPage />} />
+        <Route path="/seasonality" element={<SeasonalityPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/import" element={<ImportPage />} />

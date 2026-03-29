@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import Base, engine
-from app.api import auth, products, users, audit, analytics, imports, exports, admin
+from app.api import auth, products, users, audit, analytics, imports, exports, admin, opportunities, simulator, catalog, competitors
 
 # Create all tables
 Base.metadata.create_all(bind=engine)
@@ -33,6 +33,10 @@ app.include_router(analytics.router)
 app.include_router(imports.router)
 app.include_router(exports.router)
 app.include_router(admin.router)
+app.include_router(opportunities.router)
+app.include_router(simulator.router)
+app.include_router(catalog.router)
+app.include_router(competitors.router)
 
 @app.get("/health")
 def health_check():
