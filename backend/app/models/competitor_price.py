@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Numeric, DateTime, ForeignKey
+from sqlalchemy import Column, String, Numeric, DateTime, ForeignKey, Index
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -25,5 +25,5 @@ class CompetitorPrice(Base):
 
     # Index pro rychlejší dotazy
     __table_args__ = (
-        ("competitor_id", "recorded_at"),  # Compound index
+        Index("ix_competitor_prices_competitor_recorded", "competitor_id", "recorded_at"),
     )

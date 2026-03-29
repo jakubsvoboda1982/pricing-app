@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean, Index
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID, JSON
 import uuid
@@ -30,5 +30,5 @@ class CompetitorAlert(Base):
 
     # Index pro rychlejší dotazy
     __table_args__ = (
-        ("competitor_id", "is_read"),  # Compound index
+        Index("ix_competitor_alerts_competitor_read", "competitor_id", "is_read"),
     )
