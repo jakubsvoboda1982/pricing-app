@@ -50,7 +50,7 @@ export default function LoginPage() {
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white flex-col justify-between p-12">
         <div>
           <h1 className="text-4xl font-bold mb-2">Nutles</h1>
-          <p className="text-slate-300">Growth Copilot</p>
+          <p className="text-slate-300">Pricing Monitor</p>
         </div>
 
         <div className="space-y-8">
@@ -85,7 +85,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="text-slate-400 text-sm">© 2026 Nutles Growth Copilot. All rights reserved.</p>
+        <p className="text-slate-400 text-sm">© 2026 Nutles Pricing Monitor. All rights reserved.</p>
       </div>
 
       {/* Right Side - Login Form */}
@@ -94,7 +94,7 @@ export default function LoginPage() {
           {/* Mobile Branding */}
           <div className="lg:hidden mb-8">
             <h1 className="text-3xl font-bold text-gray-900">Nutles</h1>
-            <p className="text-gray-600">Growth Copilot</p>
+            <p className="text-gray-600">Pricing Monitor</p>
           </div>
 
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Přihlaste se</h2>
