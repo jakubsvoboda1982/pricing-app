@@ -105,8 +105,8 @@ export default function CompetitorsPage() {
   })
 
   // Načti kategorie
-  const categories = [...new Set(competitors.map(c => c.category).filter(Boolean) as string[])]
-  const totalUnreadAlerts = competitors.reduce((sum, c) => sum + (c.unread_alerts_count || 0), 0)
+  const categories = [...new Set(competitors.map((c: Competitor) => c.category).filter(Boolean) as string[])]
+  const totalUnreadAlerts = competitors.reduce((sum: number, c: Competitor) => sum + (c.unread_alerts_count || 0), 0)
 
   const handleAddCompetitor = async () => {
     if (!urlInput.trim()) {
@@ -219,7 +219,7 @@ export default function CompetitorsPage() {
             </button>
           </div>
         ) : (
-          competitors.map((competitor) => (
+          competitors.map((competitor: Competitor) => (
             <div
               key={competitor.id}
               className="bg-white rounded-lg shadow-md hover:shadow-lg transition p-6 border-l-4 border-l-green-500"
