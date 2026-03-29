@@ -4,6 +4,10 @@ export interface User {
   full_name: string
   role: 'admin' | 'pricing_manager' | 'category_manager' | 'read_only'
   is_active: boolean
+  is_verified?: boolean
+  is_approved?: boolean
+  email_verified_at?: string
+  approved_at?: string
 }
 
 export interface Product {
