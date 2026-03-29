@@ -62,9 +62,9 @@ def seed_database():
             return
 
         # Check if test company exists, otherwise create it
-        company = db.query(Company).filter_by(name="Nutles").first()
+        company = db.query(Company).filter_by(name="Nuties").first()
         if not company:
-            company = Company(id=uuid.uuid4(), name="Nutles")
+            company = Company(id=uuid.uuid4(), name="Nuties")
             db.add(company)
             db.commit()
             print(f"Created company: {company.name}")

@@ -113,7 +113,7 @@ export default function HeroPage() {
           <p className="text-lg font-semibold text-blue-700 mb-3">Premium Position</p>
 
           <p className="text-sm text-gray-600">
-            "The everyday Nutles hero — the product that brings customers back."
+            "The everyday Nuties hero — the product that brings customers back."
           </p>
 
           <div className="mt-4 pt-4 border-t border-gray-200">

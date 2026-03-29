@@ -86,7 +86,7 @@ export default function DashboardPage() {
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Denní přehled</h1>
         <p className="text-gray-600 mt-1">
-          ne 29.3.2026 · Nutles.cz · CZK
+          ne 29.3.2026 · Nuties.cz · CZK
         </p>
       </div>
 

@@ -49,7 +49,7 @@ export default function LoginPage() {
       {/* Left Side - Branding */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white flex-col justify-between p-12">
         <div>
-          <h1 className="text-4xl font-bold mb-2">Nutles</h1>
+          <h1 className="text-4xl font-bold mb-2">Nuties</h1>
           <p className="text-slate-300">Pricing Monitor</p>
         </div>
 
@@ -85,7 +85,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="text-slate-400 text-sm">© 2026 Nutles Pricing Monitor. All rights reserved.</p>
+        <p className="text-slate-400 text-sm">© 2026 Nuties Pricing Monitor. All rights reserved.</p>
       </div>
 
       {/* Right Side - Login Form */}
@@ -93,7 +93,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md">
           {/* Mobile Branding */}
           <div className="lg:hidden mb-8">
-            <h1 className="text-3xl font-bold text-gray-900">Nutles</h1>
+            <h1 className="text-3xl font-bold text-gray-900">Nuties</h1>
             <p className="text-gray-600">Pricing Monitor</p>
           </div>
 

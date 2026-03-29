@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     ]
 
     # App
-    APP_NAME: str = "Nutles Pricing Monitor"
+    APP_NAME: str = "Nuties Pricing Monitor"
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
 

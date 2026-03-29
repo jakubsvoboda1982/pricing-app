@@ -80,7 +80,7 @@ export default function Layout() {
         } bg-slate-900 text-white transition-all duration-300 flex flex-col shadow-lg`}
       >
         <div className="p-4 flex items-center justify-between border-b border-slate-700">
-          {sidebarOpen && <h1 className="text-xl font-bold">Nutles</h1>}
+          {sidebarOpen && <h1 className="text-xl font-bold">Nuties</h1>}
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="hover:bg-slate-700 p-2 rounded transition"
