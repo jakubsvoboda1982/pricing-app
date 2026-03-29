@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSON
 import uuid
 from app.database import Base
 
@@ -16,5 +16,15 @@ class Product(Base):
     sku = Column(String, nullable=False, index=True)
     category = Column(String, nullable=True)
     description = Column(Text, nullable=True)
+
+    # Propojení s katalogem
+    catalog_product_id = Column(UUID(as_uuid=True), ForeignKey("catalog_products.id"), nullable=True, index=True)
+    ean = Column(String, nullable=True, index=True)
+    thumbnail_url = Column(String(500), nullable=True)
+    url_reference = Column(String(500), nullable=True)  # URL vlastního produktu
+
+    # URL sledovaných produktů u konkurentů: [{"url": "...", "name": "Grizly.cz", "market": "CZ"}]
+    competitor_urls = Column(JSON, nullable=True, default=list)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

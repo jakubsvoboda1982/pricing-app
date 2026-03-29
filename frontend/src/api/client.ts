@@ -1,4 +1,9 @@
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+// Pokud je stránka servírována přes HTTPS, vždy použij HTTPS pro API (ochrana proti špatně nastavené env proměnné)
+const _rawApiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+export const API_BASE_URL =
+  typeof window !== 'undefined' && window.location.protocol === 'https:'
+    ? _rawApiUrl.replace(/^http:\/\//, 'https://')
+    : _rawApiUrl
 
 export class APIClient {
   private token: string | null = null
@@ -73,7 +78,7 @@ export class APIClient {
 
   // Products
   async getProducts() {
-    return this.request('GET', '/products')
+    return this.request('GET', '/products/')
   }
 
   async getProduct(id: string) {
@@ -81,7 +86,7 @@ export class APIClient {
   }
 
   async createProduct(data: any) {
-    return this.request('POST', '/products', data)
+    return this.request('POST', '/products/', data)
   }
 
   async updateProduct(id: string, data: any) {
@@ -90,6 +95,14 @@ export class APIClient {
 
   async deleteProduct(id: string) {
     return this.request('DELETE', `/products/${id}`)
+  }
+
+  async addCompetitorUrl(productId: string, url: string, name?: string, market?: string) {
+    return this.request('POST', `/products/${productId}/competitor-urls`, { url, name, market: market || 'CZ' })
+  }
+
+  async removeCompetitorUrl(productId: string, url: string) {
+    return this.request('DELETE', `/products/${productId}/competitor-urls?url=${encodeURIComponent(url)}`)
   }
 
   // Prices

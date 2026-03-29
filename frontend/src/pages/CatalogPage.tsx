@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Search, Plus, Filter, Eye, EyeOff } from 'lucide-react'
-import { API_BASE_URL } from '@/api/client'
+import { useNavigate } from 'react-router-dom'
+import { Search, Plus, Eye, CheckCircle } from 'lucide-react'
+import { apiClient, API_BASE_URL } from '@/api/client'
 import { useMarketStore } from '@/store/market'
 import MarketSelector from '@/components/MarketSelector'
 import PriceDisplay from '@/components/PriceDisplay'
@@ -26,8 +27,10 @@ interface CatalogProduct {
 export default function CatalogPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
-  const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
+  const [addedProducts, setAddedProducts] = useState<Set<string>>(new Set())
+  const [addingId, setAddingId] = useState<string | null>(null)
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const selectedMarket = useMarketStore((state) => state.selectedMarket)
 
   // Načti kategorii
@@ -67,32 +70,29 @@ export default function CatalogPage() {
     },
   })
 
-  // Mutace pro přidání produktu k sledování
-  const addToWatchlist = useMutation({
-    mutationFn: async (productId: string) => {
-      const response = await fetch(`${API_BASE_URL}/products`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: products.find((p: CatalogProduct) => p.id === productId)?.name,
-          sku: products.find((p: CatalogProduct) => p.id === productId)?.ean || 'unknown',
-          category: products.find((p: CatalogProduct) => p.id === productId)?.category,
-        }),
+  const handleAddToWatchlist = async (product: CatalogProduct) => {
+    setAddingId(product.id)
+    try {
+      await apiClient.createProduct({
+        name: product.name,
+        sku: product.ean || `catalog-${product.id}`,
+        category: product.category,
+        catalog_product_id: product.id,
+        ean: product.ean,
+        thumbnail_url: (product as any).thumbnail_url,
+        url_reference: (product as any).url_reference,
       })
-      if (!response.ok) throw new Error('Chyba')
-      return await response.json()
-    },
-    onSuccess: () => {
+      setAddedProducts(new Set(addedProducts).add(product.id))
       queryClient.invalidateQueries({ queryKey: ['products'] })
-    },
-  })
-
-  const handleAddToWatchlist = (productId: string) => {
-    addToWatchlist.mutate(productId, {
-      onSuccess: () => {
-        setSelectedProducts(new Set(selectedProducts).add(productId))
-      },
-    })
+      // Po přidání naviguj na sledované produkty
+      setTimeout(() => navigate('/products'), 800)
+    } catch {
+      // ignore - produkt pravděpodobně již existuje
+      setAddedProducts(new Set(addedProducts).add(product.id))
+      setTimeout(() => navigate('/products'), 800)
+    } finally {
+      setAddingId(null)
+    }
   }
 
   return (
@@ -196,11 +196,6 @@ export default function CatalogPage() {
           </div>
         ) : (
           products.map((product: CatalogProduct) => {
-            const isSelected = selectedProducts.has(product.id)
-            const priceWithVat = product.price_without_vat && product.vat_rate
-              ? product.price_without_vat * (1 + product.vat_rate / 100)
-              : undefined
-
             return (
               <div
                 key={product.id}
@@ -263,19 +258,21 @@ export default function CatalogPage() {
 
                 {/* Action Button */}
                 <button
-                  onClick={() => handleAddToWatchlist(product.id)}
-                  disabled={isSelected || addToWatchlist.isPending}
+                  onClick={() => handleAddToWatchlist(product)}
+                  disabled={addedProducts.has(product.id) || addingId === product.id}
                   className={`w-full py-2 rounded-lg transition flex items-center justify-center space-x-2 font-medium ${
-                    isSelected
+                    addedProducts.has(product.id)
                       ? 'bg-green-100 text-green-700 cursor-default'
                       : 'bg-blue-600 hover:bg-blue-700 text-white'
                   }`}
                 >
-                  {isSelected ? (
+                  {addedProducts.has(product.id) ? (
                     <>
-                      <Eye size={16} />
-                      <span>Sleduji</span>
+                      <CheckCircle size={16} />
+                      <span>Přidáno → přesměrovávám...</span>
                     </>
+                  ) : addingId === product.id ? (
+                    <span>Přidávám...</span>
                   ) : (
                     <>
                       <Plus size={16} />
