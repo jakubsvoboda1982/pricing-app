@@ -63,6 +63,10 @@ export class APIClient {
     })
   }
 
+  async verifyEmail(token: string, email: string) {
+    return this.request('POST', '/auth/verify-email', { token, email })
+  }
+
   async getCurrentUser() {
     return this.request('GET', '/auth/me')
   }
@@ -122,6 +126,21 @@ export class APIClient {
 
   async updateUserRole(id: string, role: string) {
     return this.request('PUT', `/users/${id}`, { role })
+  }
+
+  async getPendingUsers(statusFilter?: string) {
+    const params = new URLSearchParams()
+    if (statusFilter) params.set('status_filter', statusFilter)
+    const qs = params.toString()
+    return this.request('GET', `/users/pending${qs ? `?${qs}` : ''}`)
+  }
+
+  async approveUser(id: string) {
+    return this.request('POST', `/users/${id}/approve`)
+  }
+
+  async rejectUser(id: string) {
+    return this.request('POST', `/users/${id}/reject`)
   }
 
   // Admin

@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 def get_competitors(
     db: Session = Depends(get_db),
     category: str = None,
+    market: str = None,
     is_active: bool = True,
     skip: int = 0,
     limit: int = 50
@@ -30,6 +31,9 @@ def get_competitors(
 
     if category:
         query = query.filter(Competitor.category == category)
+
+    if market:
+        query = query.filter(Competitor.market == market)
 
     competitors = query.offset(skip).limit(limit).all()
 
@@ -57,6 +61,7 @@ def get_competitors(
             url=comp.url,
             logo_url=comp.logo_url,
             category=comp.category,
+            market=comp.market,
             is_active=comp.is_active,
             last_scrape_date=comp.last_scrape_date,
             scrape_error=comp.scrape_error,
@@ -75,20 +80,27 @@ async def add_competitor(
 ):
     """Přidej nového konkurenta - automaticky stáhne metadata z URL"""
 
-    # Ověř, že URL je unikátní
-    existing = db.query(Competitor).filter(Competitor.url == competitor_data.url).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tento konkurent je již v systému"
-        )
-
-    # Získej výchozí company (pro MVP scoped k prvnímu)
+    # Ověř, že URL je unikátní pro daný trh
+    # Nejdřív najdi company
     company = db.query(Company).first()
     if not company:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Žádná společnost v systému"
+        )
+
+    # Ověř, že URL+market+company je unikátní
+    existing = db.query(Competitor).filter(
+        and_(
+            Competitor.url == competitor_data.url,
+            Competitor.market == competitor_data.market,
+            Competitor.company_id == company.id
+        )
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Tento konkurent je již v systému pro trh {competitor_data.market}"
         )
 
     # Stáhni metadata z URL
@@ -103,6 +115,7 @@ async def add_competitor(
         company_id=company.id,
         name=scrape_data.get('name') or competitor_data.url.split('//')[1].split('/')[0],
         url=competitor_data.url,
+        market=competitor_data.market,
         logo_url=scrape_data.get('logo_url'),
         description=scrape_data.get('description'),
         email=scrape_data.get('emails', [None])[0] if scrape_data.get('emails') else None,

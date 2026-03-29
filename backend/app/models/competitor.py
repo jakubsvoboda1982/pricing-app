@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Index
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID, JSON
 import uuid
@@ -8,16 +8,22 @@ from app.database import Base
 class Competitor(Base):
     """Sledovaní konkurenti s metadatou a kontaktními informacemi"""
     __tablename__ = "competitors"
+    __table_args__ = (
+        Index('ix_competitor_url_market_company', 'url', 'market', 'company_id', unique=True),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False, index=True)
 
     # Základní informace
     name = Column(String, nullable=False)
-    url = Column(String, nullable=False, unique=True, index=True)
+    url = Column(String, nullable=False, index=True)
     logo_url = Column(String, nullable=True)
     category = Column(String, nullable=True)
     description = Column(Text, nullable=True)
+
+    # Trh/Region
+    market = Column(String(10), default="CZ", nullable=False, index=True)  # CZ, SK
 
     # Kontaktní informace
     email = Column(String, nullable=True)

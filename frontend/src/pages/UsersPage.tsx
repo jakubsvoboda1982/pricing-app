@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
-import { Plus, Trash2, Shield, Eye, Settings } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Trash2, Shield, Eye, Settings, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { User } from '@/types'
 
@@ -14,10 +14,17 @@ const ROLES = [
 export default function UsersPage() {
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({ email: '', full_name: '', role: 'read_only' })
+  const [approvalFilter, setApprovalFilter] = useState<string>('all')
+  const queryClient = useQueryClient()
 
   const { data: users, isLoading, refetch } = useQuery({
     queryKey: ['users'],
     queryFn: () => apiClient.getUsers?.() || Promise.resolve([]),
+  })
+
+  const { data: pendingUsers, isLoading: pendingLoading, refetch: refetchPending } = useQuery({
+    queryKey: ['pending-users', approvalFilter],
+    queryFn: () => apiClient.getPendingUsers?.(approvalFilter) || Promise.resolve([]),
   })
 
   const createMutation = useMutation({
@@ -32,6 +39,22 @@ export default function UsersPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiClient.deleteUser?.(id) || Promise.resolve(null),
     onSuccess: () => refetch(),
+  })
+
+  const approveMutation = useMutation({
+    mutationFn: (id: string) => apiClient.approveUser?.(id) || Promise.resolve(null),
+    onSuccess: () => {
+      refetchPending()
+      refetch()
+    },
+  })
+
+  const rejectMutation = useMutation({
+    mutationFn: (id: string) => apiClient.rejectUser?.(id) || Promise.resolve(null),
+    onSuccess: () => {
+      refetchPending()
+      refetch()
+    },
   })
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -111,6 +134,98 @@ export default function UsersPage() {
         </div>
       )}
 
+      {/* Pending Approvals Section */}
+      {pendingUsers && pendingUsers.length > 0 && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center space-x-2 mb-4">
+            <AlertCircle size={20} className="text-orange-600" />
+            <h2 className="text-xl font-semibold text-gray-900">Čekající schválení ({pendingUsers.length})</h2>
+          </div>
+
+          {/* Filter Tabs */}
+          <div className="flex space-x-2 mb-4">
+            <button
+              onClick={() => setApprovalFilter('all')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                approvalFilter === 'all'
+                  ? 'bg-orange-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Všechny čekající
+            </button>
+            <button
+              onClick={() => setApprovalFilter('pending_verification')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                approvalFilter === 'pending_verification'
+                  ? 'bg-orange-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Ověřit email
+            </button>
+            <button
+              onClick={() => setApprovalFilter('pending_approval')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                approvalFilter === 'pending_approval'
+                  ? 'bg-orange-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Schválit
+            </button>
+          </div>
+
+          {/* Pending Users Cards */}
+          <div className="space-y-3">
+            {pendingUsers.map((user: any) => (
+              <div key={user.id} className="border border-orange-200 rounded-lg p-4 bg-orange-50">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900">{user.full_name}</h3>
+                    <p className="text-sm text-gray-600 mt-1">{user.email}</p>
+                    <div className="flex items-center space-x-2 mt-2">
+                      {!user.is_verified && (
+                        <span className="inline-flex items-center space-x-1 px-2 py-1 rounded text-xs bg-yellow-100 text-yellow-800">
+                          <AlertCircle size={12} />
+                          <span>Email neověřen</span>
+                        </span>
+                      )}
+                      {user.is_verified && !user.is_approved && (
+                        <span className="inline-flex items-center space-x-1 px-2 py-1 rounded text-xs bg-blue-100 text-blue-800">
+                          <AlertCircle size={12} />
+                          <span>Čekám na schválení</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {user.is_verified && (
+                      <button
+                        onClick={() => approveMutation.mutate(user.id)}
+                        disabled={approveMutation.isPending}
+                        className="flex items-center space-x-1 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm disabled:opacity-50 transition"
+                      >
+                        <CheckCircle size={16} />
+                        <span>Schválit</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => rejectMutation.mutate(user.id)}
+                      disabled={rejectMutation.isPending}
+                      className="flex items-center space-x-1 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-sm disabled:opacity-50 transition"
+                    >
+                      <XCircle size={16} />
+                      <span>Odmítnout</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Users Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         {isLoading ? (
@@ -153,10 +268,22 @@ export default function UsersPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="inline-flex items-center space-x-1 px-3 py-1 rounded-full text-sm bg-green-50 text-green-700">
-                        <Eye size={16} />
-                        <span>Aktivní</span>
-                      </span>
+                      {!user.is_verified ? (
+                        <span className="inline-flex items-center space-x-1 px-3 py-1 rounded-full text-sm bg-yellow-50 text-yellow-700">
+                          <AlertCircle size={16} />
+                          <span>Neověřen</span>
+                        </span>
+                      ) : !user.is_approved ? (
+                        <span className="inline-flex items-center space-x-1 px-3 py-1 rounded-full text-sm bg-blue-50 text-blue-700">
+                          <AlertCircle size={16} />
+                          <span>Neodsouhlasen</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center space-x-1 px-3 py-1 rounded-full text-sm bg-green-50 text-green-700">
+                          <Eye size={16} />
+                          <span>Aktivní</span>
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
                       <button className="inline-flex items-center space-x-1 text-blue-600 hover:text-blue-700">

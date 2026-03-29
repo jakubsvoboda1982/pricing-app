@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
 
+    # Email (SMTP)
+    SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.sendgrid.net")
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USER: str = os.getenv("SMTP_USER", "apikey")
+    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+    SMTP_FROM_EMAIL: str = os.getenv("SMTP_FROM_EMAIL", "noreply@jacobsvoboda.cz")
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
     class Config:
         env_file = ".env"
 

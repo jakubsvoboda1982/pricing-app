@@ -46,8 +46,9 @@ class CompetitorAlertResponse(BaseModel):
 
 
 class CompetitorCreate(BaseModel):
-    """Vytvoření nového konkurenta - vyžaduje pouze URL"""
+    """Vytvoření nového konkurenta - vyžaduje URL a trh"""
     url: str  # URL webových stránek konkurenta
+    market: str = "CZ"  # CZ nebo SK
 
 
 class CompetitorUpdate(BaseModel):
@@ -70,6 +71,7 @@ class CompetitorResponse(BaseModel):
     url: str
     logo_url: Optional[str]
     category: Optional[str]
+    market: str = "CZ"
     description: Optional[str]
     email: Optional[str]
     phone: Optional[str]
@@ -108,6 +110,7 @@ class CompetitorListResponse(BaseModel):
     url: str
     logo_url: Optional[str]
     category: Optional[str]
+    market: str = "CZ"
     is_active: bool
     last_scrape_date: Optional[datetime]
     scrape_error: Optional[str]

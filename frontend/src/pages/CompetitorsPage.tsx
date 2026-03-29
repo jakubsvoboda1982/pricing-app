@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw, Trash2, ExternalLink, AlertCircle, TrendingUp } from 'lucide-react'
 import { apiClient } from '@/api/client'
+import MarketSelector from '@/components/MarketSelector'
+import { useMarketStore, shouldShowMarket } from '@/store/market'
 
 interface Competitor {
   id: string
@@ -9,6 +11,7 @@ interface Competitor {
   url: string
   logo_url?: string
   category?: string
+  market?: string
   is_active: boolean
   last_scrape_date?: string
   scrape_error?: string
@@ -20,17 +23,23 @@ interface Competitor {
 export default function CompetitorsPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [urlInput, setUrlInput] = useState('')
+  const [marketInput, setMarketInput] = useState<'CZ' | 'SK'>('CZ')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [isAddingCompetitor, setIsAddingCompetitor] = useState(false)
   const [addError, setAddError] = useState('')
   const queryClient = useQueryClient()
+  const selectedMarket = useMarketStore((state) => state.selectedMarket)
 
   // Načti konkurenty
   const { data: competitors = [], isLoading } = useQuery({
-    queryKey: ['competitors', selectedCategory],
+    queryKey: ['competitors', selectedCategory, selectedMarket],
     queryFn: async () => {
+      const params = new URLSearchParams()
+      if (selectedCategory) params.set('category', selectedCategory)
+      if (selectedMarket !== 'ALL') params.set('market', selectedMarket)
+
       const response = await fetch(
-        `http://localhost:8000/api/competitors${selectedCategory ? `?category=${selectedCategory}` : ''}`,
+        `http://localhost:8000/api/competitors${params.toString() ? `?${params.toString()}` : ''}`,
         {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -44,14 +53,14 @@ export default function CompetitorsPage() {
 
   // Mutace pro přidání konkurenta
   const addCompetitorMutation = useMutation({
-    mutationFn: async (url: string) => {
+    mutationFn: async (data: { url: string; market: string }) => {
       const response = await fetch('http://localhost:8000/api/competitors', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify(data),
       })
       if (!response.ok) {
         const error = await response.json()
@@ -62,6 +71,7 @@ export default function CompetitorsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['competitors'] })
       setUrlInput('')
+      setMarketInput('CZ')
       setShowAddModal(false)
       setAddError('')
     },
@@ -114,27 +124,35 @@ export default function CompetitorsPage() {
       return
     }
     setIsAddingCompetitor(true)
-    await addCompetitorMutation.mutateAsync(urlInput)
+    await addCompetitorMutation.mutateAsync({ url: urlInput, market: marketInput })
     setIsAddingCompetitor(false)
   }
 
+  // Filtrované konkurenty podle vybraného trhu
+  const filteredCompetitors = competitors.filter((c: Competitor) =>
+    shouldShowMarket(c.market, selectedMarket)
+  )
+
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header + Market Selector */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Konkurence</h1>
           <p className="text-gray-600 mt-1">
-            {competitors.length} konkurentů sledujeme
+            {filteredCompetitors.length} konkurentů sledujeme
           </p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg flex items-center space-x-2 transition"
-        >
-          <Plus size={20} />
-          <span>Přidat konkurenta</span>
-        </button>
+        <div className="flex items-center space-x-4">
+          <MarketSelector />
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg flex items-center space-x-2 transition"
+          >
+            <Plus size={20} />
+            <span>Přidat konkurenta</span>
+          </button>
+        </div>
       </div>
 
       {/* Alert Banner */}
@@ -208,18 +226,20 @@ export default function CompetitorsPage() {
           <div className="text-center py-12">
             <p className="text-gray-500">Načítám konkurenty...</p>
           </div>
-        ) : competitors.length === 0 ? (
+        ) : filteredCompetitors.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-lg">
-            <p className="text-gray-500 mb-4">Žádní konkurenti</p>
+            <p className="text-gray-500 mb-4">
+              {competitors.length === 0 ? 'Žádní konkurenti' : 'Žádní konkurenti v tomto trhu'}
+            </p>
             <button
               onClick={() => setShowAddModal(true)}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
             >
-              Přidat prvního konkurenta
+              {competitors.length === 0 ? 'Přidat prvního konkurenta' : 'Přidat konkurenta'}
             </button>
           </div>
         ) : (
-          competitors.map((competitor: Competitor) => (
+          filteredCompetitors.map((competitor: Competitor) => (
             <div
               key={competitor.id}
               className="bg-white rounded-lg shadow-md hover:shadow-lg transition p-6 border-l-4 border-l-green-500"
@@ -248,6 +268,15 @@ export default function CompetitorsPage() {
                         <span>{new URL(competitor.url).hostname}</span>
                         <ExternalLink size={14} />
                       </a>
+                      {competitor.market && (
+                        <span className={`text-xs px-2 py-1 rounded font-medium ${
+                          competitor.market === 'CZ'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-purple-100 text-purple-700'
+                        }`}>
+                          {competitor.market === 'CZ' ? '🇨🇿 CZ' : '🇸🇰 SK'}
+                        </span>
+                      )}
                       {competitor.category && (
                         <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
                           {competitor.category}
@@ -330,6 +359,36 @@ export default function CompetitorsPage() {
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
+                Trh
+              </label>
+              <div className="flex space-x-2">
+                <button
+                  onClick={() => setMarketInput('CZ')}
+                  className={`flex-1 py-2 rounded-lg font-medium transition ${
+                    marketInput === 'CZ'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                  disabled={isAddingCompetitor}
+                >
+                  🇨🇿 Česko
+                </button>
+                <button
+                  onClick={() => setMarketInput('SK')}
+                  className={`flex-1 py-2 rounded-lg font-medium transition ${
+                    marketInput === 'SK'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                  disabled={isAddingCompetitor}
+                >
+                  🇸🇰 Slovensko
+                </button>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 URL webových stránek
               </label>
               <input
@@ -353,6 +412,7 @@ export default function CompetitorsPage() {
                 onClick={() => {
                   setShowAddModal(false)
                   setUrlInput('')
+                  setMarketInput('CZ')
                   setAddError('')
                 }}
                 disabled={isAddingCompetitor}

@@ -31,8 +31,16 @@ class CatalogProduct(Base):
     quantity_in_stock = Column(Integer, nullable=True)  # Počet v skladě
     unit_of_measure = Column(String, default="ks", nullable=False)  # M. j.
 
+    # Trh/Region
+    market = Column(String(10), default="CZ", nullable=False, index=True)  # CZ, SK
+
+    # Odkazy a média
+    thumbnail_url = Column(String(500), nullable=True)  # Obrázek z feedu
+    url_reference = Column(String(500), nullable=True)  # Odkaz na produkt u dodavatele
+
     # Stav
     is_active = Column(Boolean, default=True)
+    imported_from = Column(String(50), nullable=True)  # Zdroj: heureka_cz, heureka_sk, atd.
 
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())

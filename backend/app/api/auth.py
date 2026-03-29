@@ -1,16 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.schemas.auth import UserLogin, UserRegister, TokenResponse, UserResponse
+from app.schemas.auth import UserLogin, UserRegister, TokenResponse, UserResponse, RegisterResponse, VerifyEmailRequest, VerifyEmailResponse
 from app.models import User, Company, LoginAttempt
 from app.utils.password import hash_password, verify_password
+from app.utils.email import send_verification_email
 from app.middleware.auth import create_access_token, verify_token
-from datetime import timedelta
+from datetime import datetime, timedelta
+import secrets
+import bcrypt
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-@router.post("/register", response_model=TokenResponse)
-def register(user_data: UserRegister, db: Session = Depends(get_db)):
+@router.post("/register", response_model=RegisterResponse)
+async def register(user_data: UserRegister, db: Session = Depends(get_db)):
+    """Register a new user with email verification required"""
     # Check if company exists, create if not
     company = db.query(Company).filter(Company.name == user_data.company_name).first()
     if not company:
@@ -24,26 +28,81 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
     if existing_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
-    # Create user
+    # Generate verification token (32 chars, URL-safe)
+    verification_token = secrets.token_urlsafe(32)
+
+    # Hash the token for secure storage
+    token_hash = bcrypt.hashpw(verification_token.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+    token_expires_at = datetime.utcnow() + timedelta(hours=24)
+
+    # Create user with is_verified=False and is_approved=False
     user = User(
         email=user_data.email,
         hashed_password=hash_password(user_data.password),
         full_name=user_data.full_name,
         company_id=company.id,
         role="admin",  # First user is admin
+        is_verified=False,
+        is_approved=False,
+        verification_token_hash=token_hash,
+        verification_token_expires_at=token_expires_at,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    # Create token
-    access_token = create_access_token(
-        data={"sub": str(user.id), "email": user.email}
+    # Send verification email
+    await send_verification_email(user.email, verification_token)
+
+    return RegisterResponse(
+        id=str(user.id),
+        email=user.email,
+        message="Registration successful. Check your email to verify your account."
     )
-    return TokenResponse(access_token=access_token)
+
+@router.post("/verify-email", response_model=VerifyEmailResponse)
+def verify_email(request: VerifyEmailRequest, db: Session = Depends(get_db)):
+    """Verify user's email with verification token"""
+    # Find user by email with pending verification
+    user = db.query(User).filter(
+        User.email == request.email,
+        User.is_verified == False,
+        User.verification_token_hash.isnot(None)
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No pending verification found for this email")
+
+    # Check if token has expired
+    if user.verification_token_expires_at and datetime.utcnow() > user.verification_token_expires_at:
+        # Clear expired token
+        user.verification_token_hash = None
+        user.verification_token_expires_at = None
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verification token has expired")
+
+    # Verify the token
+    try:
+        is_valid = bcrypt.checkpw(request.token.encode('utf-8'), user.verification_token_hash.encode('utf-8'))
+    except:
+        is_valid = False
+
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid verification token")
+
+    # Mark user as verified
+    user.is_verified = True
+    user.email_verified_at = datetime.utcnow()
+    user.verification_token_hash = None
+    user.verification_token_expires_at = None
+    db.commit()
+
+    return VerifyEmailResponse(message="Email verified successfully. Awaiting admin approval.")
 
 @router.post("/login", response_model=TokenResponse)
 def login(credentials: UserLogin, request: Request, db: Session = Depends(get_db)):
+    """Login user - requires email verification and admin approval"""
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
 
@@ -60,6 +119,32 @@ def login(credentials: UserLogin, request: Request, db: Session = Depends(get_db
         db.add(attempt)
         db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    # Check if user is verified
+    if not user.is_verified:
+        attempt = LoginAttempt(
+            email=credentials.email,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            success=False,
+            error_message="Email not verified",
+        )
+        db.add(attempt)
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email not verified")
+
+    # Check if user is approved
+    if not user.is_approved:
+        attempt = LoginAttempt(
+            email=credentials.email,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            success=False,
+            error_message="Awaiting admin approval",
+        )
+        db.add(attempt)
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Awaiting admin approval")
 
     # Record successful login attempt
     attempt = LoginAttempt(
@@ -89,4 +174,6 @@ def get_current_user(payload: dict = Depends(verify_token), db: Session = Depend
         full_name=user.full_name,
         role=user.role,
         is_active=user.is_active,
+        is_verified=user.is_verified,
+        is_approved=user.is_approved,
     )
