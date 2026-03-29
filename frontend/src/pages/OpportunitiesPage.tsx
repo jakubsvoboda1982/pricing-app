@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TrendingUp, AlertCircle, ArrowRight } from 'lucide-react'
-import { apiClient } from '@/api/client'
+import { apiClient, API_BASE_URL } from '@/api/client'
 import { useMarketStore } from '@/store/market'
 import MarketSelector from '@/components/MarketSelector'
 
@@ -29,7 +29,7 @@ export default function OpportunitiesPage() {
     queryKey: ['opportunities'],
     queryFn: async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/opportunities/')
+        const response = await fetch(`${API_BASE_URL}/opportunities/`)
         if (!response.ok) throw new Error('Failed to fetch opportunities')
         const data = await response.json()
         return data as Opportunity[]

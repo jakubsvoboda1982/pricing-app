@@ -15,6 +15,7 @@ class CatalogProduct(Base):
     # Identifikátory
     ean = Column(String, nullable=True, index=True)
     isbn = Column(String, nullable=True)
+    product_code = Column(String, nullable=True, index=True)  # PRODUCTNO z Heureka XML
 
     # Základní info
     name = Column(String, nullable=False)

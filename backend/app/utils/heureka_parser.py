@@ -64,6 +64,9 @@ class HeureaItem:
             return data, errors
         data['ean'] = ean
 
+        # Nepovinné pole: PRODUCTNO (kód produktu u prodejce)
+        data['product_code'] = self.get_text('PRODUCTNO')
+
         # Povinné pole: TITLE (název)
         title = self.get_text('TITLE')
         if not title:

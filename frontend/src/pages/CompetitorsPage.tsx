@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw, Trash2, ExternalLink, AlertCircle, TrendingUp } from 'lucide-react'
-import { apiClient } from '@/api/client'
+import { apiClient, API_BASE_URL } from '@/api/client'
 import MarketSelector from '@/components/MarketSelector'
 import { useMarketStore, shouldShowMarket } from '@/store/market'
 
@@ -39,10 +39,10 @@ export default function CompetitorsPage() {
       if (selectedMarket !== 'ALL') params.set('market', selectedMarket)
 
       const response = await fetch(
-        `http://localhost:8000/api/competitors${params.toString() ? `?${params.toString()}` : ''}`,
+        `${API_BASE_URL}/competitors${params.toString() ? `?${params.toString()}` : ''}`,
         {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
           }
         }
       )
@@ -54,11 +54,11 @@ export default function CompetitorsPage() {
   // Mutace pro přidání konkurenta
   const addCompetitorMutation = useMutation({
     mutationFn: async (data: { url: string; market: string }) => {
-      const response = await fetch('http://localhost:8000/api/competitors', {
+      const response = await fetch(`${API_BASE_URL}/competitors`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         },
         body: JSON.stringify(data),
       })
@@ -83,10 +83,10 @@ export default function CompetitorsPage() {
   // Mutace pro smazání konkurenta
   const deleteCompetitorMutation = useMutation({
     mutationFn: async (competitorId: string) => {
-      const response = await fetch(`http://localhost:8000/api/competitors/${competitorId}`, {
+      const response = await fetch(`${API_BASE_URL}/competitors/${competitorId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
       })
       if (!response.ok) throw new Error('Chyba při smazání')
@@ -100,10 +100,10 @@ export default function CompetitorsPage() {
   // Mutace pro re-scrape
   const rescrapeMutation = useMutation({
     mutationFn: async (competitorId: string) => {
-      const response = await fetch(`http://localhost:8000/api/competitors/${competitorId}/rescrape`, {
+      const response = await fetch(`${API_BASE_URL}/competitors/${competitorId}/rescrape`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
       })
       if (!response.ok) throw new Error('Chyba při re-scrape')

@@ -1,16 +1,173 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Query, Body
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import CatalogProduct, Company
+from app.models import CatalogProduct, Company, FeedSubscription
 from app.schemas.catalog_product import CatalogProductResponse, CatalogProductCreate
 from app.utils.heureka_parser import HeureaFeedParser, HeurekaParsError
 from uuid import UUID
 import openpyxl
 from io import BytesIO
 from decimal import Decimal
+from pydantic import BaseModel
+from typing import Optional
+import aiohttp
+import re
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 
+
+# ---------------------------------------------------------------------------
+# Schémata
+# ---------------------------------------------------------------------------
+
+class ImportUrlRequest(BaseModel):
+    url: str
+    name: Optional[str] = None
+    market: str = "CZ"
+    product_type: str = "own"   # "own" = vlastní produkt, "competitor" = konkurent
+
+
+class FeedSubscriptionCreate(BaseModel):
+    name: str
+    feed_url: str
+    market: str = "CZ"
+    merge_existing: bool = True
+
+
+class FeedSubscriptionUpdate(BaseModel):
+    name: Optional[str] = None
+    feed_url: Optional[str] = None
+    market: Optional[str] = None
+    merge_existing: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+# ---------------------------------------------------------------------------
+# Pomocné funkce
+# ---------------------------------------------------------------------------
+
+def _get_company(db: Session) -> Company:
+    company = db.query(Company).first()
+    if not company:
+        raise HTTPException(status_code=400, detail="Žádná společnost v systému")
+    return company
+
+
+def _find_existing_product(db: Session, ean: Optional[str], product_code: Optional[str], market: str, company_id) -> Optional[CatalogProduct]:
+    """Najdi existující produkt podle EAN nebo PRODUCTNO"""
+    if ean:
+        existing = db.query(CatalogProduct).filter(
+            CatalogProduct.ean == ean,
+            CatalogProduct.market == market,
+            CatalogProduct.company_id == company_id
+        ).first()
+        if existing:
+            return existing
+    if product_code:
+        existing = db.query(CatalogProduct).filter(
+            CatalogProduct.product_code == product_code,
+            CatalogProduct.market == market,
+            CatalogProduct.company_id == company_id
+        ).first()
+        if existing:
+            return existing
+    return None
+
+
+async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
+    """Načti feed z URL a importuj produkty. Aktualizuje stav FeedSubscription."""
+    company = db.query(Company).filter(Company.id == feed_sub.company_id).first()
+    if not company:
+        feed_sub.last_fetch_status = "error"
+        feed_sub.last_fetch_message = "Společnost nenalezena"
+        feed_sub.last_fetched_at = datetime.now(timezone.utc)
+        db.commit()
+        return
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(feed_sub.feed_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                if resp.status != 200:
+                    raise Exception(f"HTTP {resp.status}")
+                xml_string = await resp.text()
+
+        parser = HeureaFeedParser()
+        products, errors = parser.parse_string(xml_string, market=feed_sub.market)
+
+        imported_count = 0
+        updated_count = 0
+        skipped_count = 0
+
+        for product_data in products:
+            try:
+                ean = product_data.get('ean')
+                product_code = product_data.get('product_code')
+                name = product_data.get('name')
+
+                existing = _find_existing_product(db, ean, product_code, feed_sub.market, company.id)
+
+                if existing and feed_sub.merge_existing:
+                    existing.name = name
+                    existing.category = product_data.get('category')
+                    existing.manufacturer = product_data.get('manufacturer')
+                    existing.description = product_data.get('description')
+                    existing.price_without_vat = product_data.get('price_without_vat')
+                    existing.vat_rate = product_data.get('vat_rate')
+                    existing.quantity_in_stock = product_data.get('quantity_in_stock')
+                    existing.unit_of_measure = product_data.get('unit_of_measure', 'ks')
+                    existing.thumbnail_url = product_data.get('thumbnail_url')
+                    existing.url_reference = product_data.get('url_reference')
+                    existing.imported_from = product_data.get('imported_from')
+                    if product_code and not existing.product_code:
+                        existing.product_code = product_code
+                    db.commit()
+                    updated_count += 1
+                elif existing and not feed_sub.merge_existing:
+                    skipped_count += 1
+                else:
+                    catalog_product = CatalogProduct(
+                        company_id=company.id,
+                        ean=ean,
+                        product_code=product_code,
+                        name=name,
+                        category=product_data.get('category'),
+                        manufacturer=product_data.get('manufacturer'),
+                        description=product_data.get('description'),
+                        price_without_vat=product_data.get('price_without_vat'),
+                        vat_rate=product_data.get('vat_rate'),
+                        quantity_in_stock=product_data.get('quantity_in_stock'),
+                        unit_of_measure=product_data.get('unit_of_measure', 'ks'),
+                        market=feed_sub.market,
+                        thumbnail_url=product_data.get('thumbnail_url'),
+                        url_reference=product_data.get('url_reference'),
+                        imported_from=product_data.get('imported_from'),
+                        is_active=True,
+                        catalog_identifier=f"{company.id}_{ean}_{feed_sub.market}" if ean else None
+                    )
+                    db.add(catalog_product)
+                    db.commit()
+                    imported_count += 1
+            except Exception:
+                skipped_count += 1
+                continue
+
+        feed_sub.last_fetch_status = "success"
+        feed_sub.last_fetch_message = f"Importováno: {imported_count}, aktualizováno: {updated_count}, přeskočeno: {skipped_count}"
+        feed_sub.last_imported_count = imported_count
+        feed_sub.last_updated_count = updated_count
+
+    except Exception as e:
+        feed_sub.last_fetch_status = "error"
+        feed_sub.last_fetch_message = str(e)[:490]
+
+    feed_sub.last_fetched_at = datetime.now(timezone.utc)
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Endpointy: Katalog produktů
+# ---------------------------------------------------------------------------
 
 @router.get("/products", response_model=list[CatalogProductResponse])
 def get_catalog_products(
@@ -56,51 +213,40 @@ def import_catalog_from_excel(
 ):
     """Importuj produkty z Excel souboru do katalogu"""
     try:
-        # Načti Excel soubor
         contents = file.file.read()
         wb = openpyxl.load_workbook(BytesIO(contents))
         ws = wb.active
 
-        # Najdi company pro přihlášeného uživatele - zatím použij první
-        company = db.query(Company).first()
-        if not company:
-            raise HTTPException(status_code=400, detail="Žádná společnost v systému")
+        company = _get_company(db)
 
-        # Parsuj řádky
         imported_count = 0
         skipped_count = 0
         errors = []
 
         for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=False), 2):
             try:
-                # Načti hodnoty ze sloupců
-                # A: Kód, B: EAN, C: ISBN, D: Výrobce, E: Kategorie, G: Název, H: Aktivní, I: DPH, J: Cena, K: Nákupní cena, L: Počet skladem, M: M.j.
-                code = row[0].value if row[0] else None  # A
-                ean = str(row[1].value).strip() if row[1] and row[1].value else None  # B - konvertuj na string ihned
-                isbn = str(row[2].value).strip() if row[2] and row[2].value else None  # C
-                manufacturer = str(row[3].value).strip() if row[3] and row[3].value else None  # D
-                category = str(row[4].value).strip() if row[4] and row[4].value else None  # E
-                # F je skipped
-                name = str(row[6].value).strip() if row[6] and row[6].value else None  # G
-                is_active_str = str(row[7].value).strip() if row[7] and row[7].value else "Ano"  # H
+                code = row[0].value if row[0] else None
+                ean = str(row[1].value).strip() if row[1] and row[1].value else None
+                isbn = str(row[2].value).strip() if row[2] and row[2].value else None
+                manufacturer = str(row[3].value).strip() if row[3] and row[3].value else None
+                category = str(row[4].value).strip() if row[4] and row[4].value else None
+                name = str(row[6].value).strip() if row[6] and row[6].value else None
+                is_active_str = str(row[7].value).strip() if row[7] and row[7].value else "Ano"
 
                 if not name:
                     skipped_count += 1
                     continue
 
-                vat_rate = row[8].value if row[8] else None  # I
-                price_without_vat = row[9].value if row[9] else None  # J
-                purchase_price = row[10].value if row[10] else None  # K
-                quantity_in_stock = row[11].value if row[11] else None  # L
-                unit_of_measure = str(row[12].value).strip() if row[12] and row[12].value else "ks"  # M
+                vat_rate = row[8].value if row[8] else None
+                price_without_vat = row[9].value if row[9] else None
+                purchase_price = row[10].value if row[10] else None
+                quantity_in_stock = row[11].value if row[11] else None
+                unit_of_measure = str(row[12].value).strip() if row[12] and row[12].value else "ks"
 
-                # Konvertuj aktivní status
                 is_active = is_active_str.lower() in ["ano", "yes", "true", "1", "y"]
 
-                # Zkontroluj duplikát - s konvertovaným EAN na string
                 existing = db.query(CatalogProduct).filter_by(ean=ean, company_id=company.id).first() if ean else None
                 if existing and ean:
-                    # Aktualizuj existující produkt
                     existing.name = name
                     existing.category = category
                     existing.manufacturer = manufacturer
@@ -112,14 +258,13 @@ def import_catalog_from_excel(
                     existing.is_active = is_active
                     db.commit()
                 else:
-                    # Vytvoř nový produkt
                     catalog_product = CatalogProduct(
                         company_id=company.id,
-                        ean=ean,  # Už je string
-                        isbn=isbn,  # Už je string nebo None
-                        name=name,  # Už je string
-                        category=category,  # Už je string nebo None
-                        manufacturer=manufacturer,  # Už je string nebo None
+                        ean=ean,
+                        isbn=isbn,
+                        name=name,
+                        category=category,
+                        manufacturer=manufacturer,
                         vat_rate=Decimal(str(vat_rate)) if vat_rate else None,
                         price_without_vat=Decimal(str(price_without_vat)) if price_without_vat else None,
                         purchase_price=Decimal(str(purchase_price)) if purchase_price else None,
@@ -142,7 +287,7 @@ def import_catalog_from_excel(
             "status": "success",
             "imported": imported_count,
             "skipped": skipped_count,
-            "errors": errors[:10]  # Vrať prvních 10 chyb
+            "errors": errors[:10]
         }
 
     except Exception as e:
@@ -157,17 +302,13 @@ async def import_catalog_from_heureka(
     db: Session = Depends(get_db)
 ):
     """
-    Importuj produkty z Heureka XML feedu do katalogu
-
-    Query params:
-    - market: "CZ" nebo "SK"
-    - merge_existing: true = aktualizuj existující, false = přeskoč duplikáty
+    Importuj produkty z Heureka XML feedu do katalogu.
+    Slučuje podle EAN nebo PRODUCTNO.
     """
     if market not in ["CZ", "SK"]:
         raise HTTPException(status_code=400, detail="Market musí být 'CZ' nebo 'SK'")
 
     try:
-        # Načti a parsuj XML soubor
         contents = await file.read()
         xml_string = contents.decode('utf-8')
 
@@ -180,10 +321,7 @@ async def import_catalog_from_heureka(
                 detail=f"Chyba při parsování XML: {errors[0]['errors']}"
             )
 
-        # Najdi company pro přihlášeného uživatele - zatím použij první
-        company = db.query(Company).first()
-        if not company:
-            raise HTTPException(status_code=400, detail="Žádná společnost v systému")
+        company = _get_company(db)
 
         imported_count = 0
         skipped_count = 0
@@ -192,17 +330,12 @@ async def import_catalog_from_heureka(
         for product_data in products:
             try:
                 ean = product_data.get('ean')
+                product_code = product_data.get('product_code')
                 name = product_data.get('name')
 
-                # Zkontroluj duplikát (ean + market + company_id)
-                existing = db.query(CatalogProduct).filter(
-                    CatalogProduct.ean == ean,
-                    CatalogProduct.market == market,
-                    CatalogProduct.company_id == company.id
-                ).first()
+                existing = _find_existing_product(db, ean, product_code, market, company.id)
 
                 if existing and merge_existing:
-                    # Aktualizuj existující
                     existing.name = name
                     existing.category = product_data.get('category')
                     existing.manufacturer = product_data.get('manufacturer')
@@ -214,16 +347,18 @@ async def import_catalog_from_heureka(
                     existing.thumbnail_url = product_data.get('thumbnail_url')
                     existing.url_reference = product_data.get('url_reference')
                     existing.imported_from = product_data.get('imported_from')
+                    # Přidej product_code, pokud ještě není
+                    if product_code and not existing.product_code:
+                        existing.product_code = product_code
                     db.commit()
                     updated_count += 1
                 elif existing and not merge_existing:
-                    # Přeskoč duplikát
                     skipped_count += 1
                 else:
-                    # Vytvoř nový produkt
                     catalog_product = CatalogProduct(
                         company_id=company.id,
                         ean=ean,
+                        product_code=product_code,
                         name=name,
                         category=product_data.get('category'),
                         manufacturer=product_data.get('manufacturer'),
@@ -237,13 +372,13 @@ async def import_catalog_from_heureka(
                         url_reference=product_data.get('url_reference'),
                         imported_from=product_data.get('imported_from'),
                         is_active=True,
-                        catalog_identifier=f"{company.id}_{ean}_{market}"
+                        catalog_identifier=f"{company.id}_{ean}_{market}" if ean else None
                     )
                     db.add(catalog_product)
                     db.commit()
                     imported_count += 1
 
-            except Exception as e:
+            except Exception:
                 skipped_count += 1
                 continue
 
@@ -259,3 +394,254 @@ async def import_catalog_from_heureka(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Chyba při importu: {str(e)}")
+
+
+@router.post("/import-url")
+async def import_product_from_url(
+    payload: ImportUrlRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Importuj produkt ze zadané URL adresy.
+    Typ "own" přidá produkt do katalogu.
+    Typ "competitor" přidá konkurenční produkt ke sledování.
+    """
+    url = payload.url.strip()
+    market = payload.market if payload.market in ["CZ", "SK"] else "CZ"
+
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="URL musí začínat http:// nebo https://")
+
+    company = _get_company(db)
+
+    # Pokus o načtení titulku stránky
+    fetched_name = payload.name
+    if not fetched_name:
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {"User-Agent": "Mozilla/5.0 (compatible; PricingBot/1.0)"}
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15), headers=headers) as resp:
+                    if resp.status == 200:
+                        html = await resp.text(errors='ignore')
+                        # Extrahuj titulek
+                        match = re.search(r'<title[^>]*>([^<]+)</title>', html, re.IGNORECASE)
+                        if match:
+                            fetched_name = match.group(1).strip()
+                            # Zkrať titulek na 200 znaků
+                            fetched_name = fetched_name[:200]
+        except Exception:
+            pass
+
+    if not fetched_name:
+        # Použij doménu jako fallback
+        domain_match = re.search(r'https?://(?:www\.)?([^/]+)', url)
+        fetched_name = domain_match.group(1) if domain_match else "Nový produkt"
+
+    if payload.product_type == "competitor":
+        # Přidej konkurenční produkt – vytvoř nebo najdi Competitor záznam
+        from app.models import Competitor
+        # Použij doménu jako URL konkurenta
+        domain_match = re.search(r'(https?://(?:www\.)?[^/]+)', url)
+        competitor_base_url = domain_match.group(1) if domain_match else url
+
+        existing_comp = db.query(Competitor).filter(
+            Competitor.url == competitor_base_url,
+            Competitor.market == market,
+            Competitor.company_id == company.id
+        ).first()
+
+        if not existing_comp:
+            domain_name = re.sub(r'https?://(?:www\.)?', '', competitor_base_url)
+            competitor = Competitor(
+                company_id=company.id,
+                name=domain_name,
+                url=competitor_base_url,
+                market=market,
+                is_active=True,
+                scrape_data={"tracked_urls": [url]}
+            )
+            db.add(competitor)
+            db.commit()
+            db.refresh(competitor)
+            return {
+                "status": "success",
+                "type": "competitor",
+                "message": f"Konkurent '{domain_name}' byl přidán ke sledování",
+                "name": domain_name,
+                "url": competitor_base_url,
+                "product_url": url
+            }
+        else:
+            # Přidej URL do existujícího scrape_data
+            tracked = existing_comp.scrape_data.get("tracked_urls", []) if existing_comp.scrape_data else []
+            if url not in tracked:
+                tracked.append(url)
+                existing_comp.scrape_data = {**(existing_comp.scrape_data or {}), "tracked_urls": tracked}
+                db.commit()
+            return {
+                "status": "success",
+                "type": "competitor",
+                "message": f"URL přidána ke sledování u konkurenta '{existing_comp.name}'",
+                "name": existing_comp.name,
+                "url": competitor_base_url,
+                "product_url": url
+            }
+
+    else:
+        # Vlastní produkt – přidej do katalogu
+        existing = db.query(CatalogProduct).filter(
+            CatalogProduct.url_reference == url,
+            CatalogProduct.company_id == company.id
+        ).first()
+
+        if existing:
+            return {
+                "status": "skipped",
+                "type": "own",
+                "message": f"Produkt s touto URL již existuje: {existing.name}",
+                "id": str(existing.id),
+                "name": existing.name
+            }
+
+        catalog_product = CatalogProduct(
+            company_id=company.id,
+            name=fetched_name,
+            market=market,
+            url_reference=url,
+            imported_from="url",
+            is_active=True
+        )
+        db.add(catalog_product)
+        db.commit()
+        db.refresh(catalog_product)
+
+        return {
+            "status": "success",
+            "type": "own",
+            "message": f"Produkt '{fetched_name}' byl přidán do katalogu",
+            "id": str(catalog_product.id),
+            "name": fetched_name,
+            "url": url
+        }
+
+
+# ---------------------------------------------------------------------------
+# Endpointy: Feed Subscriptions (pravidelné XML feedy)
+# ---------------------------------------------------------------------------
+
+@router.get("/feeds")
+def get_feed_subscriptions(db: Session = Depends(get_db)):
+    """Vrať seznam všech feed subscriptions"""
+    company = _get_company(db)
+    feeds = db.query(FeedSubscription).filter(
+        FeedSubscription.company_id == company.id
+    ).order_by(FeedSubscription.created_at.desc()).all()
+    return feeds
+
+
+@router.post("/feeds")
+def create_feed_subscription(
+    payload: FeedSubscriptionCreate,
+    db: Session = Depends(get_db)
+):
+    """Přidej nový XML feed ke sledování"""
+    company = _get_company(db)
+
+    if payload.market not in ["CZ", "SK"]:
+        raise HTTPException(status_code=400, detail="Market musí být 'CZ' nebo 'SK'")
+
+    # Zkontroluj duplicitu URL
+    existing = db.query(FeedSubscription).filter(
+        FeedSubscription.feed_url == payload.feed_url,
+        FeedSubscription.company_id == company.id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Tento feed je již přidán")
+
+    feed = FeedSubscription(
+        company_id=company.id,
+        name=payload.name,
+        feed_url=payload.feed_url,
+        market=payload.market,
+        merge_existing=payload.merge_existing,
+        is_active=True
+    )
+    db.add(feed)
+    db.commit()
+    db.refresh(feed)
+    return feed
+
+
+@router.put("/feeds/{feed_id}")
+def update_feed_subscription(
+    feed_id: UUID,
+    payload: FeedSubscriptionUpdate,
+    db: Session = Depends(get_db)
+):
+    """Uprav feed subscription"""
+    company = _get_company(db)
+    feed = db.query(FeedSubscription).filter(
+        FeedSubscription.id == feed_id,
+        FeedSubscription.company_id == company.id
+    ).first()
+    if not feed:
+        raise HTTPException(status_code=404, detail="Feed nenalezen")
+
+    if payload.name is not None:
+        feed.name = payload.name
+    if payload.feed_url is not None:
+        feed.feed_url = payload.feed_url
+    if payload.market is not None:
+        feed.market = payload.market
+    if payload.merge_existing is not None:
+        feed.merge_existing = payload.merge_existing
+    if payload.is_active is not None:
+        feed.is_active = payload.is_active
+
+    db.commit()
+    db.refresh(feed)
+    return feed
+
+
+@router.delete("/feeds/{feed_id}")
+def delete_feed_subscription(
+    feed_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """Smaž feed subscription"""
+    company = _get_company(db)
+    feed = db.query(FeedSubscription).filter(
+        FeedSubscription.id == feed_id,
+        FeedSubscription.company_id == company.id
+    ).first()
+    if not feed:
+        raise HTTPException(status_code=404, detail="Feed nenalezen")
+
+    db.delete(feed)
+    db.commit()
+    return {"message": "Feed byl smazán"}
+
+
+@router.post("/feeds/{feed_id}/fetch")
+async def trigger_feed_fetch(
+    feed_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """Ručně spusť načtení feedu"""
+    company = _get_company(db)
+    feed = db.query(FeedSubscription).filter(
+        FeedSubscription.id == feed_id,
+        FeedSubscription.company_id == company.id
+    ).first()
+    if not feed:
+        raise HTTPException(status_code=404, detail="Feed nenalezen")
+
+    await _fetch_and_import_feed(feed, db)
+
+    return {
+        "status": feed.last_fetch_status,
+        "message": feed.last_fetch_message,
+        "imported": feed.last_imported_count,
+        "updated": feed.last_updated_count,
+        "fetched_at": feed.last_fetched_at
+    }

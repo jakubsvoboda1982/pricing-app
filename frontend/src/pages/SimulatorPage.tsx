@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { TrendingUp, TrendingDown, DollarSign, ArrowRight } from 'lucide-react'
+import { API_BASE_URL } from '@/api/client'
 
 interface Product {
   id: string
@@ -42,7 +43,7 @@ export default function SimulatorPage() {
     queryKey: ['simulatorProducts'],
     queryFn: async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/simulator/products')
+        const response = await fetch(`${API_BASE_URL}/simulator/products`)
         if (!response.ok) throw new Error('Failed to fetch products')
         const data = await response.json()
         return data as Product[]

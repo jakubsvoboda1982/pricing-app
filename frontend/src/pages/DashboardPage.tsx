@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { TrendingUp, TrendingDown, AlertCircle, ArrowRight } from 'lucide-react'
+import { API_BASE_URL } from '@/api/client'
 
 interface Product {
   id: string
@@ -25,7 +26,7 @@ export default function DashboardPage() {
     queryKey: ['dashboardProducts'],
     queryFn: async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/products/')
+        const response = await fetch(`${API_BASE_URL}/products/`)
         if (!response.ok) throw new Error('Failed to fetch products')
         return await response.json()
       } catch (error) {

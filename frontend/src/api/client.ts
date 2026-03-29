@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
 export class APIClient {
   private token: string | null = null
@@ -216,6 +216,32 @@ export class APIClient {
 
   async dismissAlert(alertId: string) {
     return this.request('PUT', `/competitors/alerts/${alertId}/dismiss`)
+  }
+
+  // Catalog - import by URL
+  async importProductFromUrl(url: string, market: string = 'CZ', productType: 'own' | 'competitor' = 'own', name?: string) {
+    return this.request('POST', '/catalog/import-url', { url, market, product_type: productType, name })
+  }
+
+  // Catalog - feed subscriptions
+  async getFeedSubscriptions() {
+    return this.request('GET', '/catalog/feeds')
+  }
+
+  async createFeedSubscription(data: { name: string; feed_url: string; market: string; merge_existing: boolean }) {
+    return this.request('POST', '/catalog/feeds', data)
+  }
+
+  async updateFeedSubscription(id: string, data: Partial<{ name: string; feed_url: string; market: string; merge_existing: boolean; is_active: boolean }>) {
+    return this.request('PUT', `/catalog/feeds/${id}`, data)
+  }
+
+  async deleteFeedSubscription(id: string) {
+    return this.request('DELETE', `/catalog/feeds/${id}`)
+  }
+
+  async triggerFeedFetch(id: string) {
+    return this.request('POST', `/catalog/feeds/${id}/fetch`)
   }
 
   // Catalog - import

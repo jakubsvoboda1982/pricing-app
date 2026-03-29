@@ -1,8 +1,41 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from app.config import get_settings
-from app.database import Base, engine
+from app.database import Base, engine, SessionLocal
 from app.api import auth, products, users, audit, analytics, imports, exports, admin, opportunities, simulator, catalog, competitors
+
+
+async def run_all_active_feeds():
+    """Načti všechny aktivní feedy (spouštěno schedulérem 1x denně)"""
+    from app.models import FeedSubscription
+    from app.api.catalog import _fetch_and_import_feed
+
+    db = SessionLocal()
+    try:
+        feeds = db.query(FeedSubscription).filter(FeedSubscription.is_active == True).all()
+        for feed in feeds:
+            try:
+                await _fetch_and_import_feed(feed, db)
+            except Exception as e:
+                print(f"[Scheduler] Chyba při načítání feedu {feed.name}: {e}")
+    finally:
+        db.close()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    scheduler = AsyncIOScheduler()
+    # Spusť každý den v 02:00 UTC
+    scheduler.add_job(run_all_active_feeds, 'cron', hour=2, minute=0)
+    scheduler.start()
+    print("[Scheduler] Denní načítání feedů aktivováno (02:00 UTC)")
+    yield
+    # Shutdown
+    scheduler.shutdown()
+
 
 # Create all tables
 Base.metadata.create_all(bind=engine)
@@ -10,7 +43,8 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(
     title="Pricing Management Software",
     description="API for pricing product management",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan
 )
 
 settings = get_settings()

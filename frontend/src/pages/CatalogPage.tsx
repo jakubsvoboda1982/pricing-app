@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Search, Plus, Filter, Eye, EyeOff } from 'lucide-react'
+import { API_BASE_URL } from '@/api/client'
 import { useMarketStore } from '@/store/market'
 import MarketSelector from '@/components/MarketSelector'
 import PriceDisplay from '@/components/PriceDisplay'
@@ -34,7 +35,7 @@ export default function CatalogPage() {
     queryKey: ['catalogCategories'],
     queryFn: async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/catalog/categories')
+        const response = await fetch(`${API_BASE_URL}/catalog/categories`)
         if (!response.ok) throw new Error('Chyba')
         return await response.json()
       } catch (error) {
@@ -48,7 +49,7 @@ export default function CatalogPage() {
     queryKey: ['catalogProducts', selectedCategory, searchTerm, selectedMarket],
     queryFn: async () => {
       try {
-        let url = 'http://localhost:8000/api/catalog/products'
+        let url = `${API_BASE_URL}/catalog/products`
         const params = new URLSearchParams()
 
         if (selectedCategory) params.append('category', selectedCategory)
@@ -69,7 +70,7 @@ export default function CatalogPage() {
   // Mutace pro přidání produktu k sledování
   const addToWatchlist = useMutation({
     mutationFn: async (productId: string) => {
-      const response = await fetch('http://localhost:8000/api/products', {
+      const response = await fetch(`${API_BASE_URL}/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

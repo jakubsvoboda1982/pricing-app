@@ -10,5 +10,6 @@ from .competitor import Competitor
 from .competitor_price import CompetitorPrice
 from .competitor_rank import CompetitorRank
 from .competitor_alert import CompetitorAlert
+from .feed_subscription import FeedSubscription
 
-__all__ = ["Company", "User", "Product", "Price", "AuditLog", "Analytics", "LoginAttempt", "CatalogProduct", "Competitor", "CompetitorPrice", "CompetitorRank", "CompetitorAlert"]
+__all__ = ["Company", "User", "Product", "Price", "AuditLog", "Analytics", "LoginAttempt", "CatalogProduct", "Competitor", "CompetitorPrice", "CompetitorRank", "CompetitorAlert", "FeedSubscription"]
