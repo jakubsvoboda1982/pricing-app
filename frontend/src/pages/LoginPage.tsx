@@ -156,9 +156,14 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p className="text-center text-gray-600 text-sm mt-8">
-            Potřebujete pomoc? Kontaktujte <a href="mailto:support@nutles.cz" className="text-blue-600 hover:underline">podporu</a>
-          </p>
+          <div className="mt-8 space-y-4 text-center text-gray-600 text-sm">
+            <p>
+              Nemáš účet? <a href="/register" className="text-blue-600 hover:underline font-medium">Zaregistruj se</a>
+            </p>
+            <p>
+              Potřebujete pomoc? Kontaktujte <a href="mailto:support@nutles.cz" className="text-blue-600 hover:underline">podporu</a>
+            </p>
+          </div>
         </div>
       </div>
     </div>
