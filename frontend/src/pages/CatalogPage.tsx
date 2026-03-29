@@ -1,6 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Search, Plus, Filter, Eye, EyeOff } from 'lucide-react'
+import { useMarketStore } from '@/store/market'
+import MarketSelector from '@/components/MarketSelector'
+import PriceDisplay from '@/components/PriceDisplay'
 
 interface CatalogProduct {
   id: string
@@ -14,6 +17,7 @@ interface CatalogProduct {
   quantity_in_stock?: number
   unit_of_measure: string
   is_active: boolean
+  market?: string
   created_at: string
   imported_at: string
 }
@@ -23,6 +27,7 @@ export default function CatalogPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
   const queryClient = useQueryClient()
+  const selectedMarket = useMarketStore((state) => state.selectedMarket)
 
   // Načti kategorii
   const { data: categories = [] } = useQuery({
@@ -40,7 +45,7 @@ export default function CatalogPage() {
 
   // Načti produkty z katalogu
   const { data: products = [], isLoading } = useQuery({
-    queryKey: ['catalogProducts', selectedCategory, searchTerm],
+    queryKey: ['catalogProducts', selectedCategory, searchTerm, selectedMarket],
     queryFn: async () => {
       try {
         let url = 'http://localhost:8000/api/catalog/products'
@@ -48,6 +53,7 @@ export default function CatalogPage() {
 
         if (selectedCategory) params.append('category', selectedCategory)
         if (searchTerm) params.append('search', searchTerm)
+        if (selectedMarket && selectedMarket !== 'ALL') params.append('market', selectedMarket)
 
         if (params.toString()) url += `?${params.toString()}`
 
@@ -91,11 +97,14 @@ export default function CatalogPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Katalog produktů</h1>
-        <p className="text-gray-600 mt-1">
-          {products.length} produktů v katalogu · Vyber které chceš sledovat
-        </p>
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Katalog produktů</h1>
+          <p className="text-gray-600 mt-1">
+            {products.length} produktů v katalogu · Vyber které chceš sledovat
+          </p>
+        </div>
+        <MarketSelector />
       </div>
 
       {/* Quick Actions */}
@@ -187,6 +196,9 @@ export default function CatalogPage() {
         ) : (
           products.map((product: CatalogProduct) => {
             const isSelected = selectedProducts.has(product.id)
+            const priceWithVat = product.price_without_vat && product.vat_rate
+              ? product.price_without_vat * (1 + product.vat_rate / 100)
+              : undefined
 
             return (
               <div
@@ -196,7 +208,12 @@ export default function CatalogPage() {
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <h3 className="font-semibold text-gray-900">{product.name}</h3>
-                    <div className="flex gap-2 mt-1">
+                    <div className="flex gap-2 mt-1 items-center flex-wrap">
+                      {product.market && (
+                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-medium">
+                          {product.market === 'CZ' ? '🇨🇿 CZ' : '🇸🇰 SK'}
+                        </span>
+                      )}
                       {product.manufacturer && (
                         <p className="text-sm text-gray-600">{product.manufacturer}</p>
                       )}
@@ -206,7 +223,7 @@ export default function CatalogPage() {
                     </div>
                   </div>
                   {product.ean && (
-                    <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                    <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded whitespace-nowrap">
                       EAN: {product.ean}
                     </span>
                   )}
@@ -214,14 +231,14 @@ export default function CatalogPage() {
 
                 {/* Cena */}
                 <div className="mb-4 grid grid-cols-1 gap-3">
-                  {product.price_without_vat && (
-                    <div className="p-3 bg-blue-50 rounded-lg">
-                      <p className="text-xs text-blue-600">Prodejní cena bez DPH</p>
-                      <p className="font-semibold text-blue-900">
-                        {product.price_without_vat} Kč
-                        {product.vat_rate && <span className="text-sm text-blue-700"> (DPH {product.vat_rate}%)</span>}
-                      </p>
-                    </div>
+                  {product.price_without_vat && product.vat_rate !== undefined && (
+                    <PriceDisplay
+                      priceWithoutVat={product.price_without_vat}
+                      vatRate={product.vat_rate}
+                      currency="Kč"
+                      showBreakdown={true}
+                      className="bg-blue-50 rounded-lg p-3"
+                    />
                   )}
                   {product.purchase_price && (
                     <div className="p-3 bg-gray-50 rounded-lg">

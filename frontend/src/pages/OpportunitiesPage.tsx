@@ -3,6 +3,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TrendingUp, AlertCircle, ArrowRight } from 'lucide-react'
 import { apiClient } from '@/api/client'
+import { useMarketStore } from '@/store/market'
+import MarketSelector from '@/components/MarketSelector'
 
 interface Opportunity {
   id: string
@@ -10,6 +12,8 @@ interface Opportunity {
   score: number
   priority: 'high' | 'medium' | 'low'
   price_range: string
+  price_without_vat?: { min: number; max: number }
+  vat_rate?: number
   description: string
   tags: string[]
   sales: string
@@ -18,6 +22,7 @@ interface Opportunity {
 
 export default function OpportunitiesPage() {
   const navigate = useNavigate()
+  const selectedMarket = useMarketStore((state) => state.selectedMarket)
   const [priceFilter, setPriceFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all')
 
   const { data: opportunities = [], isLoading } = useQuery({
@@ -121,11 +126,14 @@ export default function OpportunitiesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Nové produktové příležitosti</h1>
-        <p className="text-gray-600 mt-1">
-          {opportunities.length} příležitostí identifikováno · 4 vysoká priorita
-        </p>
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Nové produktové příležitosti</h1>
+          <p className="text-gray-600 mt-1">
+            {opportunities.length} příležitostí identifikováno · 4 vysoká priorita
+          </p>
+        </div>
+        <MarketSelector />
       </div>
 
       {/* Quick Actions */}
@@ -212,6 +220,11 @@ export default function OpportunitiesPage() {
               <div>
                 <p className="text-xs text-gray-600">Cenový rozsah</p>
                 <p className="font-semibold text-gray-900 text-sm">{opportunity.price_range}</p>
+                {opportunity.price_without_vat && opportunity.vat_rate && (
+                  <p className="text-xs text-gray-600 mt-1">
+                    s DPH ({opportunity.vat_rate}%): {Math.round(opportunity.price_without_vat.min * (1 + opportunity.vat_rate / 100))}–{Math.round(opportunity.price_without_vat.max * (1 + opportunity.vat_rate / 100))} Kč
+                  </p>
+                )}
               </div>
             </div>
 

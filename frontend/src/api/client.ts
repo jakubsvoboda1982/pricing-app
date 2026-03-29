@@ -175,15 +175,16 @@ export class APIClient {
   }
 
   // Competitors
-  async getCompetitors(category?: string) {
+  async getCompetitors(category?: string, market?: string) {
     const params = new URLSearchParams()
     if (category) params.set('category', category)
+    if (market) params.set('market', market)
     const qs = params.toString()
     return this.request('GET', `/competitors${qs ? `?${qs}` : ''}`)
   }
 
-  async addCompetitor(url: string) {
-    return this.request('POST', '/competitors', { url })
+  async addCompetitor(url: string, market?: string) {
+    return this.request('POST', '/competitors', { url, market: market || 'CZ' })
   }
 
   async getCompetitor(id: string) {
@@ -215,6 +216,33 @@ export class APIClient {
 
   async dismissAlert(alertId: string) {
     return this.request('PUT', `/competitors/alerts/${alertId}/dismiss`)
+  }
+
+  // Catalog - import
+  async importHeureaFeed(file: File, market: string = 'CZ', mergeExisting: boolean = false) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('market', market)
+    formData.append('merge_existing', String(mergeExisting))
+
+    const url = `${API_BASE_URL}/catalog/import-heureka`
+    const headers: HeadersInit = {}
+
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData,
+    })
+
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status} ${response.statusText}`)
+    }
+
+    return response.json()
   }
 }
 

@@ -3,14 +3,17 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { Plus, Trash2, Edit2, TrendingUp } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { Product } from '@/types'
+import MarketSelector from '@/components/MarketSelector'
+import { useMarketStore } from '@/store/market'
 
 export default function ProductsPage() {
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({ name: '', sku: '', category: '', description: '' })
   const [editingId, setEditingId] = useState<string | null>(null)
+  const selectedMarket = useMarketStore((state) => state.selectedMarket)
 
   const { data: products, isLoading, refetch } = useQuery({
-    queryKey: ['products'],
+    queryKey: ['products', selectedMarket],
     queryFn: () => apiClient.getProducts(),
   })
 
@@ -37,15 +40,18 @@ export default function ProductsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-start">
         <h1 className="text-3xl font-bold text-gray-900">Sledované produkty</h1>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
-        >
-          <Plus size={20} />
-          <span>Nový produkt</span>
-        </button>
+        <div className="flex flex-col items-end gap-4">
+          <MarketSelector />
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
+          >
+            <Plus size={20} />
+            <span>Nový produkt</span>
+          </button>
+        </div>
       </div>
 
       {/* Add Product Form */}
