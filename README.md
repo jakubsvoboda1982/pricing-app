@@ -154,6 +154,35 @@ railway up
 ### Database
 Use Supabase for PostgreSQL hosting (free tier available)
 
+## 🚀 Recent Features (Phase 5)
+
+### Heureka XML Feed Import
+- Import products directly from Heureka XML feed format
+- Automatic market (CZ/SK) detection and separation
+- Merge existing products by EAN
+- Full DPH (VAT) calculation and display
+
+### Market Separation
+- Complete CZ/SK market separation at product and competitor level
+- Market selector component in UI
+- Filtered views per market
+- Unique competitor constraints by market
+
+### VAT Display
+- Prices displayed with VAT throughout the application
+- PriceDisplay component with flexible breakdown options
+- VAT calculator utilities
+- Support for multiple VAT rates
+
+## 📋 Deployment
+
+For complete deployment instructions, see [DEPLOYMENT.md](./DEPLOYMENT.md)
+
+### Quick Start
+1. Apply database migration 004 on Supabase
+2. Set environment variables on Railway (backend) and Vercel (frontend)
+3. Deploy: `git push origin main` (auto-deploys via GitHub)
+
 ## Contributing
 
 1. Create feature branch: `git checkout -b feature/your-feature`
