@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 from app.database import get_db
-from app.schemas.product import ProductCreate, ProductUpdate, ProductResponse, PriceResponse, CompetitorUrlItem
+from app.schemas.product import ProductCreate, ProductUpdate, ProductResponse, PriceResponse, PriceCreate, CompetitorUrlItem
 from app.models import Product, Price, CatalogProduct, Company
 from uuid import UUID
 from pydantic import BaseModel
@@ -18,25 +19,47 @@ class CompetitorUrlAdd(BaseModel):
 
 
 def _get_domain_name(url: str) -> str:
-    """Extrahuj doménové jméno z URL"""
     match = re.search(r'https?://(?:www\.)?([^/]+)', url)
     return match.group(1) if match else url
+
+
+def _enrich_with_price(product: Product, db: Session) -> dict:
+    """Přidej poslední cenu k produktu"""
+    price = db.query(Price).filter(
+        Price.product_id == product.id
+    ).order_by(desc(Price.changed_at)).first()
+
+    return {
+        'id': product.id,
+        'name': product.name,
+        'sku': product.sku,
+        'category': product.category,
+        'description': product.description,
+        'ean': product.ean,
+        'thumbnail_url': product.thumbnail_url,
+        'url_reference': product.url_reference,
+        'catalog_product_id': product.catalog_product_id,
+        'competitor_urls': product.competitor_urls,
+        'current_price': price.current_price if price else None,
+        'old_price': price.old_price if price else None,
+        'market': price.market if price else 'CZ',
+        'created_at': product.created_at,
+        'updated_at': product.updated_at,
+    }
 
 
 @router.get("/", response_model=list[ProductResponse])
 def list_products(db: Session = Depends(get_db)):
     products = db.query(Product).all()
-    return products
+    return [ProductResponse(**_enrich_with_price(p, db)) for p in products]
 
 
 @router.post("/", response_model=ProductResponse)
 def create_product(product: ProductCreate, db: Session = Depends(get_db)):
-    # Najdi company
     company = db.query(Company).first()
     if not company:
         raise HTTPException(status_code=400, detail="Žádná společnost")
 
-    # Pokud je zadán catalog_product_id, doplň data z katalogu
     extra_data = {}
     if product.catalog_product_id:
         try:
@@ -52,14 +75,12 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
         except Exception:
             pass
 
-    # Zkontroluj duplicitu SKU pro tuto firmu
     existing = db.query(Product).filter(
         Product.sku == product.sku,
         Product.company_id == company.id
     ).first()
     if existing:
-        # Vrať existující produkt místo chyby
-        return existing
+        return ProductResponse(**_enrich_with_price(existing, db))
 
     db_product = Product(
         company_id=company.id,
@@ -76,7 +97,7 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
     db.add(db_product)
     db.commit()
     db.refresh(db_product)
-    return db_product
+    return ProductResponse(**_enrich_with_price(db_product, db))
 
 
 @router.get("/{product_id}", response_model=ProductResponse)
@@ -84,7 +105,7 @@ def get_product(product_id: UUID, db: Session = Depends(get_db)):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-    return product
+    return ProductResponse(**_enrich_with_price(product, db))
 
 
 @router.put("/{product_id}", response_model=ProductResponse)
@@ -93,49 +114,63 @@ def update_product(product_id: UUID, product_update: ProductUpdate, db: Session 
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
-    for key, value in product_update.dict(exclude_unset=True).items():
+    for key, value in product_update.model_dump(exclude_unset=True).items():
         setattr(product, key, value)
 
     db.commit()
     db.refresh(product)
-    return product
+    return ProductResponse(**_enrich_with_price(product, db))
 
 
 @router.delete("/{product_id}")
 def delete_product(product_id: UUID, db: Session = Depends(get_db)):
+    """Odebere produkt ze sledování - katalogový záznam zůstane zachován"""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
+    # Smažeme pouze ceny a samotný produkt ze sledování
+    db.query(Price).filter(Price.product_id == product_id).delete()
     db.delete(product)
     db.commit()
-    return {"message": "Product deleted"}
+    return {"message": "Produkt odebrán ze sledování. Záznam v katalogu zůstán zachován."}
 
 
 @router.get("/{product_id}/prices", response_model=list[PriceResponse])
 def get_product_prices(product_id: UUID, db: Session = Depends(get_db)):
-    prices = db.query(Price).filter(Price.product_id == product_id).all()
+    prices = db.query(Price).filter(
+        Price.product_id == product_id
+    ).order_by(desc(Price.changed_at)).limit(30).all()
     return prices
 
 
-# ---------------------------------------------------------------------------
-# Správa URL konkurentů pro sledovaný produkt
-# ---------------------------------------------------------------------------
+@router.post("/{product_id}/prices", response_model=PriceResponse)
+def set_product_price(product_id: UUID, price_data: PriceCreate, db: Session = Depends(get_db)):
+    """Nastav cenu produktu ručně"""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Produkt nenalezen")
+
+    price = Price(
+        product_id=product_id,
+        market=price_data.market,
+        currency=price_data.currency,
+        current_price=price_data.current_price,
+        old_price=price_data.old_price,
+    )
+    db.add(price)
+    db.commit()
+    db.refresh(price)
+    return price
+
 
 @router.post("/{product_id}/competitor-urls")
-def add_competitor_url(
-    product_id: UUID,
-    payload: CompetitorUrlAdd,
-    db: Session = Depends(get_db)
-):
-    """Přidej URL produktu u konkurenta ke sledovanému produktu"""
+def add_competitor_url(product_id: UUID, payload: CompetitorUrlAdd, db: Session = Depends(get_db)):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
     urls = list(product.competitor_urls or [])
-
-    # Zkontroluj duplicitu
     if any(u.get('url') == payload.url for u in urls):
         raise HTTPException(status_code=400, detail="Tato URL je již přidána")
 
@@ -145,16 +180,11 @@ def add_competitor_url(
     product.competitor_urls = urls
     db.commit()
     db.refresh(product)
-    return product
+    return ProductResponse(**_enrich_with_price(product, db))
 
 
 @router.delete("/{product_id}/competitor-urls")
-def remove_competitor_url(
-    product_id: UUID,
-    url: str,
-    db: Session = Depends(get_db)
-):
-    """Odeber URL konkurenta od sledovaného produktu"""
+def remove_competitor_url(product_id: UUID, url: str, db: Session = Depends(get_db)):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
@@ -163,4 +193,4 @@ def remove_competitor_url(
     product.competitor_urls = urls
     db.commit()
     db.refresh(product)
-    return product
+    return ProductResponse(**_enrich_with_price(product, db))

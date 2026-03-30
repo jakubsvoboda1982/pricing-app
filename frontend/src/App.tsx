@@ -20,6 +20,7 @@ import SimulatorPage from './pages/SimulatorPage'
 import SeasonalityPage from './pages/SeasonalityPage'
 import CatalogPage from './pages/CatalogPage'
 import CompetitorsPage from './pages/CompetitorsPage'
+import ProductDetailPage from './pages/ProductDetailPage'
 import CompetitorDetailPage from './pages/CompetitorDetailPage'
 import { useAuthStore } from './store/auth'
 
@@ -46,6 +47,7 @@ function AppRoutes() {
       >
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/products" element={<ProductsPage />} />
+        <Route path="/products/:id" element={<ProductDetailPage />} />
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/competitors" element={<CompetitorsPage />} />
         <Route path="/competitors/:id" element={<CompetitorDetailPage />} />

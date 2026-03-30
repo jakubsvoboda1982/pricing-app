@@ -54,6 +54,10 @@ class ProductResponse(BaseModel):
     url_reference: Optional[str] = None
     catalog_product_id: Optional[UUID] = None
     competitor_urls: Optional[List[Any]] = None
+    # Latest price (enriched from prices table)
+    current_price: Optional[Decimal] = None
+    old_price: Optional[Decimal] = None
+    market: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
