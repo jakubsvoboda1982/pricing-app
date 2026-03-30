@@ -50,7 +50,7 @@ class UserCreateRequest(BaseModel):
     password: str
     full_name: str
     role: str = "read_only"
-    company_id: str
+    company_id: Optional[str] = None  # optional - falls back to admin's company
 
 
 class UserUpdateRequest(BaseModel):
@@ -169,12 +169,18 @@ def create_user(
             detail=f"Invalid role. Must be one of: {VALID_ROLES}",
         )
 
+    # Use provided company_id or fall back to admin's company
+    company_id = uuid.UUID(user_data.company_id) if user_data.company_id else admin_user.company_id
+
     user = User(
         email=user_data.email,
         hashed_password=hash_password(user_data.password),
         full_name=user_data.full_name,
         role=user_data.role,
-        company_id=uuid.UUID(user_data.company_id),
+        company_id=company_id,
+        is_verified=True,
+        is_approved=True,
+        is_active=True,
     )
     db.add(user)
     db.commit()

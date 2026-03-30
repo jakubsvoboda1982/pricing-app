@@ -32,8 +32,10 @@ export class APIClient {
       'Content-Type': 'application/json',
     }
 
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`
+    // Always read fresh token from localStorage to handle cases where token was set after construction
+    const currentToken = this.token || localStorage.getItem('access_token')
+    if (currentToken) {
+      headers['Authorization'] = `Bearer ${currentToken}`
     }
 
     const options: RequestInit = {
