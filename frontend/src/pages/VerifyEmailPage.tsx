@@ -56,9 +56,7 @@ export default function VerifyEmailPage() {
       }
     }
 
-    if (retryCount === 0) {
-      verifyToken()
-    }
+    verifyToken()
   }, [searchParams, navigate, retryCount])
 
   const handleRetry = () => {

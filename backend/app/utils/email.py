@@ -18,7 +18,8 @@ async def send_verification_email(email: str, token: str) -> bool:
         True if email sent successfully, False otherwise
     """
     settings = get_settings()
-    verify_url = f"{settings.FRONTEND_URL}/verify-email?token={token}"
+    from urllib.parse import quote
+    verify_url = f"{settings.FRONTEND_URL}/verify-email?token={token}&email={quote(email)}"
 
     try:
         # Create email message
@@ -76,13 +77,19 @@ Tento odkaz vyprší za 24 hodin.
         msg.attach(MIMEText(html_body, "html"))
 
         # Send email via SMTP
-        async with aiosmtplib.SMTP(
+        # Port 465 uses SSL/TLS from start; port 587 uses STARTTLS
+        use_ssl = settings.SMTP_PORT == 465
+        smtp = aiosmtplib.SMTP(
             hostname=settings.SMTP_HOST,
             port=settings.SMTP_PORT,
-            use_tls=True,
-        ) as smtp:
-            await smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            await smtp.send_message(msg)
+            use_tls=use_ssl,
+        )
+        await smtp.connect()
+        if not use_ssl:
+            await smtp.starttls()
+        await smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+        await smtp.send_message(msg)
+        await smtp.quit()
 
         return True
 
@@ -154,13 +161,18 @@ Pokud máš jakékoli otázky, neváhej nás kontaktovat.
         msg.attach(MIMEText(html_body, "html"))
 
         # Send email via SMTP
-        async with aiosmtplib.SMTP(
+        use_ssl = settings.SMTP_PORT == 465
+        smtp = aiosmtplib.SMTP(
             hostname=settings.SMTP_HOST,
             port=settings.SMTP_PORT,
-            use_tls=True,
-        ) as smtp:
-            await smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            await smtp.send_message(msg)
+            use_tls=use_ssl,
+        )
+        await smtp.connect()
+        if not use_ssl:
+            await smtp.starttls()
+        await smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+        await smtp.send_message(msg)
+        await smtp.quit()
 
         return True
 
