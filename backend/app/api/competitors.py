@@ -74,14 +74,12 @@ def get_competitors(
 
 
 @router.post("", response_model=CompetitorResponse, status_code=status.HTTP_201_CREATED)
-async def add_competitor(
+def add_competitor(
     competitor_data: CompetitorCreate,
     db: Session = Depends(get_db)
 ):
-    """Přidej nového konkurenta - automaticky stáhne metadata z URL"""
+    """Přidej nového konkurenta - okamžitě bez čekání na scraping"""
 
-    # Ověř, že URL je unikátní pro daný trh
-    # Nejdřív najdi company
     company = db.query(Company).first()
     if not company:
         raise HTTPException(
@@ -89,7 +87,7 @@ async def add_competitor(
             detail="Žádná společnost v systému"
         )
 
-    # Ověř, že URL+market+company je unikátní
+    # Ověř unikátnost URL+market+company
     existing = db.query(Competitor).filter(
         and_(
             Competitor.url == competitor_data.url,
@@ -103,25 +101,31 @@ async def add_competitor(
             detail=f"Tento konkurent je již v systému pro trh {competitor_data.market}"
         )
 
-    # Stáhni metadata z URL
-    try:
-        scrape_data = await scrape_competitor_metadata(competitor_data.url)
-    except Exception as e:
-        scrape_data = {'success': False, 'error': str(e)}
-        logger.error(f"Scraping error for {competitor_data.url}: {str(e)}")
+    # Extrahuj doménové jméno jako název
+    import re as _re
+    domain = _re.sub(r'https?://(www\.)?', '', competitor_data.url).split('/')[0]
+    # Detect country from domain
+    if '.sk' in domain:
+        country = 'SK'
+    elif '.cz' in domain:
+        country = 'CZ'
+    else:
+        country = None
+
+    scrape_data = {'success': False}
 
     # Vytvoř konkurenta
     competitor = Competitor(
         company_id=company.id,
-        name=scrape_data.get('name') or competitor_data.url.split('//')[1].split('/')[0],
+        name=domain,
         url=competitor_data.url,
         market=competitor_data.market,
-        logo_url=scrape_data.get('logo_url'),
-        description=scrape_data.get('description'),
-        email=scrape_data.get('emails', [None])[0] if scrape_data.get('emails') else None,
-        phone=scrape_data.get('phones', [None])[0] if scrape_data.get('phones') else None,
-        address=scrape_data.get('address'),
-        country=scrape_data.get('country'),
+        logo_url=None,
+        description=None,
+        email=None,
+        phone=None,
+        address=None,
+        country=country,
         first_scrape_date=datetime.utcnow() if scrape_data.get('success') else None,
         last_scrape_date=datetime.utcnow() if scrape_data.get('success') else None,
         scrape_error=scrape_data.get('error') if not scrape_data.get('success') else None,
