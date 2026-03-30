@@ -23,6 +23,10 @@ interface Product {
   current_price?: number | null
   old_price?: number | null
   market?: string
+  purchase_price?: number | null
+  min_price?: number | null
+  margin?: number | null
+  hero_score?: number | null
   created_at: string
 }
 
@@ -93,6 +97,19 @@ export default function ProductsPage() {
             <Star size={14} />
             {products.length} produktů
           </span>
+          {/* Margin summary */}
+          {(() => {
+            const withMargin = (products as Product[]).filter(p => p.margin != null)
+            if (withMargin.length === 0) return null
+            const avg = withMargin.reduce((s, p) => s + Number(p.margin), 0) / withMargin.length
+            return (
+              <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${
+                avg >= 20 ? 'bg-green-100 text-green-700' : avg >= 10 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+              }`}>
+                Ø marže {avg.toFixed(1)} %
+              </span>
+            )
+          })()}
           <button
             onClick={() => navigate('/import')}
             className="flex items-center gap-1.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-sm transition"
@@ -182,7 +199,7 @@ export default function ProductsPage() {
             <div className="flex-1">Produkt</div>
             <div className="w-36 text-right">Cena</div>
             <div className="w-28 text-right">Marže</div>
-            <div className="w-36 text-right">Doporučená</div>
+            <div className="w-36 text-right">Hero Score</div>
             <div className="w-24 text-right">Akce</div>
           </div>
 
@@ -264,14 +281,45 @@ export default function ProductsPage() {
                       )}
                     </div>
 
-                    {/* Margin (placeholder - needs cost price) */}
+                    {/* Margin */}
                     <div className="w-28 text-right">
-                      <span className="text-sm text-gray-400">—</span>
+                      {product.margin != null ? (
+                        <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${
+                          Number(product.margin) >= 20
+                            ? 'bg-green-100 text-green-700'
+                            : Number(product.margin) >= 10
+                            ? 'bg-yellow-100 text-yellow-700'
+                            : Number(product.margin) > 0
+                            ? 'bg-orange-100 text-orange-700'
+                            : 'bg-red-100 text-red-700'
+                        }`}>
+                          {Number(product.margin).toFixed(1)} %
+                        </span>
+                      ) : (
+                        <span className="text-sm text-gray-400">—</span>
+                      )}
                     </div>
 
-                    {/* Recommended */}
+                    {/* Hero Score */}
                     <div className="w-36 text-right">
-                      <span className="text-xs text-gray-400">Doporučená cena</span>
+                      {product.hero_score != null ? (
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${
+                                product.hero_score >= 80 ? 'bg-green-500'
+                                : product.hero_score >= 60 ? 'bg-yellow-400'
+                                : product.hero_score >= 40 ? 'bg-orange-400'
+                                : 'bg-red-400'
+                              }`}
+                              style={{ width: `${product.hero_score}%` }}
+                            />
+                          </div>
+                          <span className="text-xs font-medium text-gray-600">{product.hero_score}</span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
+                      )}
                     </div>
 
                     {/* Actions */}

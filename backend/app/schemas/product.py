@@ -58,6 +58,12 @@ class ProductResponse(BaseModel):
     current_price: Optional[Decimal] = None
     old_price: Optional[Decimal] = None
     market: Optional[str] = None
+    # Cenotvorba
+    purchase_price: Optional[Decimal] = None
+    min_price: Optional[Decimal] = None
+    # Vypočítané hodnoty
+    margin: Optional[Decimal] = None       # Marže v % = (current - purchase) / current * 100
+    hero_score: Optional[int] = None       # 0–100
     created_at: datetime
     updated_at: Optional[datetime] = None
 

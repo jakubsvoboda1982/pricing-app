@@ -206,16 +206,67 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
 # Endpointy: Katalog produktů
 # ---------------------------------------------------------------------------
 
+def _enrich_catalog_product(cp: CatalogProduct, db: Session) -> dict:
+    """Obohaď katalogový produkt o price_vat a linked watched product info."""
+    from app.models import Product as WatchedProduct
+
+    # Vypočítej cenu s DPH
+    price_vat = None
+    if cp.price_without_vat is not None and cp.vat_rate is not None:
+        price_vat = cp.price_without_vat * (1 + cp.vat_rate / 100)
+    elif cp.price_without_vat is not None:
+        price_vat = cp.price_without_vat
+
+    # Najdi linked watched product
+    watched = db.query(WatchedProduct).filter(
+        WatchedProduct.catalog_product_id == cp.id
+    ).first()
+
+    competitor_urls = None
+    watched_product_id = None
+    if watched:
+        watched_product_id = watched.id
+        raw_urls = watched.competitor_urls or []
+        competitor_urls = [
+            {"url": u.get("url", ""), "name": u.get("name", ""), "market": u.get("market", "CZ")}
+            for u in raw_urls if u.get("url")
+        ]
+
+    return {
+        "id": cp.id,
+        "name": cp.name,
+        "ean": cp.ean,
+        "category": cp.category,
+        "manufacturer": cp.manufacturer,
+        "price_without_vat": cp.price_without_vat,
+        "price_vat": price_vat,
+        "purchase_price": cp.purchase_price,
+        "vat_rate": cp.vat_rate,
+        "quantity_in_stock": cp.quantity_in_stock,
+        "unit_of_measure": cp.unit_of_measure,
+        "market": cp.market,
+        "thumbnail_url": cp.thumbnail_url,
+        "url_reference": cp.url_reference,
+        "imported_from": cp.imported_from,
+        "is_active": cp.is_active,
+        "watched_product_id": watched_product_id,
+        "competitor_urls": competitor_urls,
+        "created_at": cp.created_at,
+        "imported_at": cp.imported_at,
+    }
+
+
 @router.get("/products", response_model=list[CatalogProductResponse])
 def get_catalog_products(
     db: Session = Depends(get_db),
     category: str = None,
+    manufacturer: str = None,
     market: str = Query(None, description="CZ, SK, nebo null pro všechny"),
     search: str = None,
     skip: int = 0,
-    limit: int = 100
+    limit: int = 200
 ):
-    """Získej produkty z katalogu s filtrem"""
+    """Získej produkty z katalogu s filtrem a obohacenými daty"""
     query = db.query(CatalogProduct)
 
     if market:
@@ -224,14 +275,19 @@ def get_catalog_products(
     if category:
         query = query.filter(CatalogProduct.category == category)
 
+    if manufacturer:
+        query = query.filter(CatalogProduct.manufacturer == manufacturer)
+
     if search:
         query = query.filter(
             CatalogProduct.name.ilike(f"%{search}%") |
             CatalogProduct.ean.ilike(f"%{search}%") |
-            CatalogProduct.category.ilike(f"%{search}%")
+            CatalogProduct.category.ilike(f"%{search}%") |
+            CatalogProduct.manufacturer.ilike(f"%{search}%")
         )
 
-    return query.offset(skip).limit(limit).all()
+    products = query.offset(skip).limit(limit).all()
+    return [CatalogProductResponse(**_enrich_catalog_product(p, db)) for p in products]
 
 
 @router.get("/categories")
@@ -241,6 +297,15 @@ def get_categories(db: Session = Depends(get_db)):
         CatalogProduct.category.isnot(None)
     ).all()
     return [cat[0] for cat in categories]
+
+
+@router.get("/manufacturers")
+def get_manufacturers(db: Session = Depends(get_db)):
+    """Získej seznam všech výrobců v katalogu"""
+    manufacturers = db.query(CatalogProduct.manufacturer).distinct().filter(
+        CatalogProduct.manufacturer.isnot(None)
+    ).all()
+    return sorted([m[0] for m in manufacturers if m[0]])
 
 
 @router.post("/import")

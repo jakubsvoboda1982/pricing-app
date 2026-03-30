@@ -1,258 +1,357 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { TrendingUp, TrendingDown, AlertCircle, ArrowRight } from 'lucide-react'
+import { TrendingUp, TrendingDown, Package, Star, AlertCircle, ArrowRight, BarChart2, Target, ShoppingCart } from 'lucide-react'
 import { API_BASE_URL } from '@/api/client'
 
 interface Product {
   id: string
   name: string
+  sku: string
   category?: string
-}
-
-interface MetricCard {
-  label: string
-  value: number | string
-  unit?: string
-  icon?: string
-  trend?: number
-  color: 'blue' | 'orange' | 'red' | 'green'
+  thumbnail_url?: string
+  current_price?: number | null
+  purchase_price?: number | null
+  margin?: number | null
+  hero_score?: number | null
+  market?: string
+  competitor_urls?: { url: string; name: string; market: string }[]
 }
 
 export default function DashboardPage() {
   const navigate = useNavigate()
 
-  // Fetch products for calculating metrics
-  const { data: products = [] } = useQuery({
+  const { data: products = [] } = useQuery<Product[]>({
     queryKey: ['dashboardProducts'],
     queryFn: async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/products/`)
-        if (!response.ok) throw new Error('Failed to fetch products')
-        return await response.json()
-      } catch (error) {
-        console.error('Error fetching products:', error)
-        return []
-      }
+      const r = await fetch(`${API_BASE_URL}/products/`)
+      if (!r.ok) return []
+      return r.json()
     },
   })
 
-  // Calculate metrics
+  // --- Real metrics ---
   const totalProducts = products.length
-  const requiredChanges = Math.floor(totalProducts * 0.15) // ~15% need changes
-  const verifiedAlerts = Math.floor(totalProducts * 0.12) // ~12% have alerts
-  const averageMargin = 60.6 // Static for now
-  const overpriced = Math.floor(totalProducts * 0.05) // ~5% overpriced
-  const underpriced = Math.floor(totalProducts * 0.15) // ~15% underpriced
-  const competitorUpdates = 3 // Days old
-  const dataFreshness = 20 // Percentage
+  const withPrice = products.filter((p) => p.current_price != null).length
+  const withMargin = products.filter((p) => p.margin != null)
+  const avgMargin = withMargin.length
+    ? withMargin.reduce((s, p) => s + Number(p.margin), 0) / withMargin.length
+    : null
+  const withHero = products.filter((p) => p.hero_score != null)
+  const avgHero = withHero.length
+    ? Math.round(withHero.reduce((s, p) => s + Number(p.hero_score), 0) / withHero.length)
+    : null
 
-  const metrics: MetricCard[] = [
-    { label: 'CELKEM PRODUKTŮ', value: totalProducts, unit: 'Aktivní v systému', color: 'blue' },
-    { label: 'POTŘEBNÉ ZMĚNY', value: requiredChanges, unit: 'Cenová doporučení', color: 'orange' },
-    { label: 'OVĚŘENÁ UPOZORNĚNÍ', value: verifiedAlerts, unit: '1 kritických', color: 'red' },
-    { label: 'PRŮMĚRNÁ MARŽE', value: `${averageMargin}%`, unit: 'Přes všechny produkty', color: 'green' },
-    { label: 'PŘEDRAŽENÉ', value: overpriced, unit: 'vs medián konkurence', color: 'blue' },
-    { label: 'PODHODNOCENÉ', value: underpriced, unit: 'Nechávají peníze na stole', color: 'green' },
-    { label: 'AKTUALIZACE KONKURENTŮ', value: competitorUpdates, unit: 'Dnes', color: 'blue' },
-    { label: 'ČERSTVOST DAT', value: `${dataFreshness}%`, unit: 'Data o konkurenci', color: 'green' },
-  ]
+  const lowMarginCount = withMargin.filter((p) => Number(p.margin) < 10).length
+  const noCompetitorCount = products.filter(
+    (p) => !p.competitor_urls || p.competitor_urls.length === 0
+  ).length
+  const noPriceCount = products.filter((p) => p.current_price == null).length
 
-  const colorClasses = {
-    blue: 'from-blue-50 to-blue-100 text-blue-900',
-    orange: 'from-orange-50 to-orange-100 text-orange-900',
-    red: 'from-red-50 to-red-100 text-red-900',
-    green: 'from-green-50 to-green-100 text-green-900',
-  }
+  // Top 5 products by hero score
+  const topProducts = [...products]
+    .filter((p) => p.hero_score != null)
+    .sort((a, b) => Number(b.hero_score) - Number(a.hero_score))
+    .slice(0, 5)
 
-  const samplePriceActions = [
-    { product: 'Freeze-Dried Strawberries', type: 'Freeze-Dried', current: 69, recommended: 74, change: '+7.2%', action: 'Zvýšit' },
-    { product: 'Christmas Nut Gift Box', type: 'Gift Packs', current: 299, recommended: 299, change: '0.8%', action: 'Kontrola' },
-    { product: 'Energy Trail Mix', type: 'Mixes', current: 99, recommended: 99, change: '8.0%', action: 'Bundle' },
-    { product: 'Cashews Roasted & Salted', type: 'Nuts', current: 89, recommended: 86, change: '-3.4%', action: 'Slevit' },
-    { product: 'Premium Nut Mix', type: 'Mixes', current: 189, recommended: 199, change: '+5.3%', action: 'Zvýšit' },
-  ]
+  // Products needing attention (low hero score)
+  const needAttention = [...products]
+    .filter((p) => p.hero_score != null && p.hero_score < 50)
+    .sort((a, b) => Number(a.hero_score) - Number(b.hero_score))
+    .slice(0, 5)
 
-  const categoryMargins = [
-    { category: 'Nuts', margin: 65, width: '65%' },
-    { category: 'Dried', margin: 48, width: '48%' },
-    { category: 'Created', margin: 72, width: '72%' },
-    { category: 'Freeze-Dried', margin: 58, width: '58%' },
-    { category: 'Mixes', margin: 42, width: '42%' },
-    { category: 'Packs', margin: 35, width: '35%' },
-  ]
+  // Category breakdown
+  const catMap: Record<string, { count: number; margin: number[]; hero: number[] }> = {}
+  products.forEach((p) => {
+    const cat = p.category?.split('|').pop()?.trim() || 'Ostatní'
+    if (!catMap[cat]) catMap[cat] = { count: 0, margin: [], hero: [] }
+    catMap[cat].count++
+    if (p.margin != null) catMap[cat].margin.push(Number(p.margin))
+    if (p.hero_score != null) catMap[cat].hero.push(Number(p.hero_score))
+  })
+  const categories = Object.entries(catMap)
+    .map(([name, d]) => ({
+      name,
+      count: d.count,
+      avgMargin: d.margin.length ? d.margin.reduce((a, b) => a + b, 0) / d.margin.length : null,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6)
+
+  const today = new Date().toLocaleDateString('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric', year: 'numeric' })
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Denní přehled</h1>
-        <p className="text-gray-600 mt-1">
-          ne 29.3.2026 · Nuties.cz · CZK
-        </p>
-      </div>
-
-      {/* Alert Banner */}
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <AlertCircle className="text-red-600" size={20} />
-          <div>
-            <p className="text-sm font-medium text-red-900">Scrape failed: Oriesky.sk — 3 days</p>
-          </div>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Denní přehled</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{today} · Nuties.cz · CZK</p>
         </div>
-        <button onClick={() => navigate('/audit')} className="text-red-600 hover:text-red-700 text-sm font-medium">Zobrazit upozornění →</button>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <button
-          onClick={() => navigate('/opportunities')}
-          className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-lg p-4 hover:shadow-md transition text-left"
-        >
-          <p className="text-sm font-medium text-purple-900">Nové příležitosti</p>
-          <p className="text-xs text-purple-700 mt-1">Objevuj růstové potenciály</p>
-          <ArrowRight size={16} className="text-purple-600 mt-3" />
-        </button>
-        <button
-          onClick={() => navigate('/simulator')}
-          className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-4 hover:shadow-md transition text-left"
-        >
-          <p className="text-sm font-medium text-blue-900">Simulátor</p>
-          <p className="text-xs text-blue-700 mt-1">Testuj cenové strategie</p>
-          <ArrowRight size={16} className="text-blue-600 mt-3" />
-        </button>
         <button
           onClick={() => navigate('/products')}
-          className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-lg p-4 hover:shadow-md transition text-left"
+          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm transition"
         >
-          <p className="text-sm font-medium text-green-900">Produkty</p>
-          <p className="text-xs text-green-700 mt-1">Spravuj svůj katalog</p>
-          <ArrowRight size={16} className="text-green-600 mt-3" />
-        </button>
-        <button
-          onClick={() => navigate('/seasonality')}
-          className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-lg p-4 hover:shadow-md transition text-left"
-        >
-          <p className="text-sm font-medium text-orange-900">Sezónnost</p>
-          <p className="text-xs text-orange-700 mt-1">Průběh poptávky v čase</p>
-          <ArrowRight size={16} className="text-orange-600 mt-3" />
+          <Package size={14} />
+          Sledované produkty
         </button>
       </div>
 
-      {/* Metrics Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {metrics.map((metric) => (
-          <div key={metric.label} className={`bg-gradient-to-br ${colorClasses[metric.color]} rounded-lg p-6 shadow-sm`}>
-            <p className="text-xs font-semibold uppercase mb-2 opacity-75">{metric.label}</p>
-            <div className="flex items-end justify-between">
-              <div>
-                <p className="text-3xl font-bold">{metric.value}</p>
-                <p className="text-xs opacity-75 mt-1">{metric.unit}</p>
+      {/* Alerts */}
+      {(lowMarginCount > 0 || noPriceCount > 0) && (
+        <div className="space-y-2">
+          {noPriceCount > 0 && (
+            <div
+              onClick={() => navigate('/products')}
+              className="cursor-pointer bg-orange-50 border border-orange-200 rounded-xl p-3.5 flex items-center justify-between hover:bg-orange-100 transition"
+            >
+              <div className="flex items-center gap-2.5">
+                <AlertCircle size={16} className="text-orange-600 flex-shrink-0" />
+                <p className="text-sm text-orange-800">
+                  <span className="font-semibold">{noPriceCount} produktů</span> nemá nastavenou prodejní cenu
+                </p>
               </div>
-              {metric.color === 'blue' && <TrendingUp size={20} className="opacity-40" />}
-              {metric.color === 'green' && <TrendingUp size={20} className="opacity-40" />}
-              {metric.color === 'orange' && <TrendingDown size={20} className="opacity-40" />}
-              {metric.color === 'red' && <TrendingDown size={20} className="opacity-40" />}
+              <ArrowRight size={15} className="text-orange-500" />
             </div>
-          </div>
-        ))}
-      </div>
+          )}
+          {lowMarginCount > 0 && (
+            <div
+              onClick={() => navigate('/products')}
+              className="cursor-pointer bg-red-50 border border-red-200 rounded-xl p-3.5 flex items-center justify-between hover:bg-red-100 transition"
+            >
+              <div className="flex items-center gap-2.5">
+                <TrendingDown size={16} className="text-red-600 flex-shrink-0" />
+                <p className="text-sm text-red-800">
+                  <span className="font-semibold">{lowMarginCount} produktů</span> má marži pod 10 % — zkontroluj nákupní ceny
+                </p>
+              </div>
+              <ArrowRight size={15} className="text-red-500" />
+            </div>
+          )}
+          {noCompetitorCount > 0 && (
+            <div
+              onClick={() => navigate('/products')}
+              className="cursor-pointer bg-blue-50 border border-blue-200 rounded-xl p-3.5 flex items-center justify-between hover:bg-blue-100 transition"
+            >
+              <div className="flex items-center gap-2.5">
+                <Target size={16} className="text-blue-600 flex-shrink-0" />
+                <p className="text-sm text-blue-800">
+                  <span className="font-semibold">{noCompetitorCount} produktů</span> nemá sledované URL konkurence
+                </p>
+              </div>
+              <ArrowRight size={15} className="text-blue-500" />
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Bottom Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Daily Price Actions */}
-        <div className="lg:col-span-2 bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold text-gray-900">Dnešní cenové akce</h2>
-            <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">Zobrazit vše →</button>
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div
+          onClick={() => navigate('/products')}
+          className="cursor-pointer bg-white border border-gray-200 rounded-xl p-5 hover:shadow-sm transition"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Sledované produkty</p>
+            <Package size={16} className="text-blue-500" />
           </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="text-left text-xs font-semibold text-gray-600 py-3 px-0">Produkt</th>
-                  <th className="text-left text-xs font-semibold text-gray-600 py-3 px-0">Aktuální</th>
-                  <th className="text-left text-xs font-semibold text-gray-600 py-3 px-0">Doporučená</th>
-                  <th className="text-left text-xs font-semibold text-gray-600 py-3 px-0">Akce</th>
-                  <th className="text-left text-xs font-semibold text-gray-600 py-3 px-0">Jistota</th>
-                </tr>
-              </thead>
-              <tbody>
-                {samplePriceActions.map((row, idx) => (
-                  <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 px-0 cursor-pointer" onClick={() => navigate('/products')}>
-                      <p className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline">{row.product}</p>
-                      <p className="text-xs text-gray-500">{row.type}</p>
-                    </td>
-                    <td className="py-3 px-0 text-sm text-gray-900">{row.current} CZK</td>
-                    <td className="py-3 px-0">
-                      <span className="text-sm font-medium text-gray-900">{row.recommended} CZK</span>
-                      <span className={`text-xs block ${row.change.startsWith('+') ? 'text-green-600' : 'text-red-600'}`}>
-                        {row.change}
-                      </span>
-                    </td>
-                    <td className="py-3 px-0">
-                      <span className={`inline-block text-xs px-2 py-1 rounded ${
-                        row.action === 'Zvýšit' ? 'bg-green-100 text-green-700' :
-                        row.action === 'Kontrola' ? 'bg-yellow-100 text-yellow-700' :
-                        row.action === 'Bundle' ? 'bg-blue-100 text-blue-700' :
-                        'bg-red-100 text-red-700'
-                      }`}>
-                        {row.action}
-                      </span>
-                    </td>
-                    <td className="py-3 px-0">
-                      <div className="flex items-center">
-                        <div className="w-12 h-2 bg-gray-200 rounded-full mr-2">
-                          <div className="h-full bg-blue-600 rounded-full" style={{ width: '75%' }}></div>
-                        </div>
-                        <span className="text-xs text-gray-600">75%</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <p className="text-3xl font-bold text-gray-900">{totalProducts}</p>
+          <p className="text-xs text-gray-400 mt-1">{withPrice} s aktuální cenou</p>
         </div>
 
-        {/* Margin by Category & Price Position */}
-        <div className="space-y-6">
-          {/* Margin by Category */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Marže podle kategorie</h3>
-            <div className="space-y-3">
-              {categoryMargins.map((item) => (
-                <div key={item.category}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-gray-700">{item.category}</span>
-                    <span className="text-xs font-semibold text-gray-600">{item.margin}%</span>
-                  </div>
-                  <div className="w-full h-2 bg-gray-200 rounded-full">
-                    <div
-                      className="h-full bg-gradient-to-r from-orange-400 to-orange-600 rounded-full"
-                      style={{ width: item.width }}
-                    ></div>
-                  </div>
-                </div>
-              ))}
-            </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Průměrná marže</p>
+            <TrendingUp size={16} className="text-green-500" />
+          </div>
+          {avgMargin != null ? (
+            <>
+              <p className={`text-3xl font-bold ${avgMargin >= 20 ? 'text-green-600' : avgMargin >= 10 ? 'text-yellow-600' : 'text-red-600'}`}>
+                {avgMargin.toFixed(1)} %
+              </p>
+              <p className="text-xs text-gray-400 mt-1">z {withMargin.length} produktů s nák. cenou</p>
+            </>
+          ) : (
+            <>
+              <p className="text-3xl font-bold text-gray-300">—</p>
+              <p className="text-xs text-gray-400 mt-1">Nastav nákupní ceny</p>
+            </>
+          )}
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Průměrný Hero Score</p>
+            <Star size={16} className="text-yellow-500" />
+          </div>
+          {avgHero != null ? (
+            <>
+              <p className={`text-3xl font-bold ${avgHero >= 80 ? 'text-green-600' : avgHero >= 60 ? 'text-yellow-600' : avgHero >= 40 ? 'text-orange-600' : 'text-red-600'}`}>
+                {avgHero}
+              </p>
+              <div className="mt-2 w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${avgHero >= 80 ? 'bg-green-500' : avgHero >= 60 ? 'bg-yellow-400' : avgHero >= 40 ? 'bg-orange-400' : 'bg-red-400'}`}
+                  style={{ width: `${avgHero}%` }}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-3xl font-bold text-gray-300">—</p>
+              <p className="text-xs text-gray-400 mt-1">Přidej ceny a nák. ceny</p>
+            </>
+          )}
+        </div>
+
+        <div
+          onClick={() => navigate('/catalog')}
+          className="cursor-pointer bg-white border border-gray-200 rounded-xl p-5 hover:shadow-sm transition"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Bez konkurence</p>
+            <ShoppingCart size={16} className="text-purple-500" />
+          </div>
+          <p className={`text-3xl font-bold ${noCompetitorCount > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+            {noCompetitorCount}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">produktů bez URL konkurentů</p>
+        </div>
+      </div>
+
+      {/* Bottom grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Products needing attention */}
+        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-sm font-semibold text-gray-800">
+              {needAttention.length > 0 ? '⚠️ Produkty potřebující pozornost' : '✅ Top produkty podle Hero Score'}
+            </h2>
+            <button onClick={() => navigate('/products')} className="text-xs text-blue-600 hover:underline">
+              Zobrazit vše →
+            </button>
           </div>
 
-          {/* Price Position */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Cenová pozice</h3>
-            <div className="h-32 bg-gray-50 rounded-lg flex items-end justify-around px-4 py-4 gap-2">
-              {[40, 35, 42, 38, 45, 41, 39, 43].map((h, i) => (
-                <div key={i} className="flex-1 h-full flex flex-col justify-end">
+          {totalProducts === 0 ? (
+            <div className="text-center py-8">
+              <Package size={40} className="mx-auto text-gray-200 mb-3" />
+              <p className="text-sm text-gray-400 mb-4">Zatím žádné sledované produkty</p>
+              <button
+                onClick={() => navigate('/catalog')}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm"
+              >
+                Vybrat z katalogu
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {(needAttention.length > 0 ? needAttention : topProducts).map((p) => {
+                const score = p.hero_score ?? 0
+                const scoreColor = score >= 80 ? 'bg-green-500' : score >= 60 ? 'bg-yellow-400' : score >= 40 ? 'bg-orange-400' : 'bg-red-400'
+                return (
                   <div
-                    className="w-full bg-gradient-to-t from-green-400 to-green-500 rounded-t opacity-75 hover:opacity-100 transition"
-                    style={{ height: `${(h / 50) * 100}%` }}
-                  ></div>
-                </div>
+                    key={p.id}
+                    onClick={() => navigate(`/products/${p.id}`)}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 cursor-pointer transition"
+                  >
+                    {p.thumbnail_url ? (
+                      <img src={p.thumbnail_url} alt="" className="w-8 h-8 object-contain rounded bg-gray-50 border flex-shrink-0"
+                        onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                    ) : (
+                      <div className="w-8 h-8 bg-blue-50 rounded border flex items-center justify-center flex-shrink-0">
+                        <Package size={13} className="text-blue-300" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{p.name}</p>
+                      <p className="text-xs text-gray-400">{p.category?.split('|').pop()?.trim() || p.sku}</p>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {p.current_price != null && (
+                        <span className="text-sm font-semibold text-gray-700">
+                          {Number(p.current_price).toLocaleString('cs-CZ')} Kč
+                        </span>
+                      )}
+                      {p.margin != null && (
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                          Number(p.margin) >= 20 ? 'bg-green-100 text-green-700'
+                          : Number(p.margin) >= 10 ? 'bg-yellow-100 text-yellow-700'
+                          : 'bg-red-100 text-red-700'
+                        }`}>
+                          {Number(p.margin).toFixed(1)}%
+                        </span>
+                      )}
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-14 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${scoreColor}`} style={{ width: `${score}%` }} />
+                        </div>
+                        <span className="text-xs text-gray-500 w-5 text-right">{score}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Right sidebar */}
+        <div className="space-y-5">
+          {/* Category breakdown */}
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <h3 className="text-sm font-semibold text-gray-800 mb-4">
+              <BarChart2 size={14} className="inline mr-1.5 text-gray-400" />
+              Marže podle kategorie
+            </h3>
+            {categories.length === 0 ? (
+              <p className="text-xs text-gray-400">Žádné kategorie</p>
+            ) : (
+              <div className="space-y-3">
+                {categories.map((cat) => (
+                  <div key={cat.name}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-gray-600 truncate max-w-[120px]" title={cat.name}>{cat.name}</span>
+                      <span className="text-xs font-semibold text-gray-700 ml-2">
+                        {cat.avgMargin != null ? `${cat.avgMargin.toFixed(1)}%` : '—'}
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          cat.avgMargin == null ? 'bg-gray-200'
+                          : cat.avgMargin >= 20 ? 'bg-green-400'
+                          : cat.avgMargin >= 10 ? 'bg-yellow-400'
+                          : 'bg-red-400'
+                        }`}
+                        style={{ width: cat.avgMargin != null ? `${Math.min(cat.avgMargin, 100)}%` : '0%' }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Quick actions */}
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">Rychlé akce</h3>
+            <div className="space-y-2">
+              {[
+                { label: 'Přidat produkt z katalogu', path: '/catalog', icon: Package },
+                { label: 'Importovat produkty', path: '/import', icon: TrendingUp },
+                { label: 'Přidat konkurenta', path: '/competitors', icon: Target },
+                { label: 'Simulátor cen', path: '/simulator', icon: BarChart2 },
+              ].map(({ label, path, icon: Icon }) => (
+                <button
+                  key={path}
+                  onClick={() => navigate(path)}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition text-left"
+                >
+                  <Icon size={14} className="text-gray-400 flex-shrink-0" />
+                  {label}
+                  <ArrowRight size={12} className="ml-auto text-gray-300" />
+                </button>
               ))}
             </div>
-            <p className="text-xs text-gray-500 text-center mt-3">Poslední 8 dní</p>
           </div>
         </div>
       </div>

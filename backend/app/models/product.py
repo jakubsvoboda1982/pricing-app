@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, UniqueConstraint, Numeric
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID, JSON
 import uuid
@@ -25,6 +25,10 @@ class Product(Base):
 
     # URL sledovaných produktů u konkurentů: [{"url": "...", "name": "Grizly.cz", "market": "CZ"}]
     competitor_urls = Column(JSON, nullable=True, default=list)
+
+    # Cenotvorba
+    purchase_price = Column(Numeric(12, 2), nullable=True)  # Nákupní cena
+    min_price = Column(Numeric(12, 2), nullable=True)        # Minimální prodejní cena
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

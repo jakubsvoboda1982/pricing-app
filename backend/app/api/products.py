@@ -7,6 +7,7 @@ from app.models import Product, Price, CatalogProduct, Company
 from uuid import UUID
 from pydantic import BaseModel
 from typing import Optional
+from decimal import Decimal
 import re
 
 router = APIRouter(prefix="/api/products", tags=["products"])
@@ -18,16 +19,81 @@ class CompetitorUrlAdd(BaseModel):
     market: str = "CZ"
 
 
+class PricingUpdate(BaseModel):
+    purchase_price: Optional[Decimal] = None
+    min_price: Optional[Decimal] = None
+
+
 def _get_domain_name(url: str) -> str:
     match = re.search(r'https?://(?:www\.)?([^/]+)', url)
     return match.group(1) if match else url
 
 
+def _compute_hero_score(
+    current_price: Optional[Decimal],
+    purchase_price: Optional[Decimal],
+    min_price: Optional[Decimal],
+    competitor_urls: Optional[list],
+) -> int:
+    """
+    Hero Score (0–100) — měří připravenost produktu na optimální cenotvorbu.
+
+    Složení:
+      25  Aktuální cena nastavena
+      15  Nákupní cena nastavena
+      35  Kvalita marže (0 / 5 / 10 / 18 / 28 / 35)
+      10  Minimální cena nastavena
+      15  Sleduje alespoň 1 URL konkurenta
+    """
+    score = 0
+
+    if current_price is not None:
+        score += 25
+
+    if purchase_price is not None:
+        score += 15
+        # Marže = (prodejní - nákupní) / prodejní * 100
+        if current_price and current_price > 0:
+            margin_pct = (current_price - purchase_price) / current_price * 100
+            if margin_pct >= 30:
+                score += 35
+            elif margin_pct >= 20:
+                score += 28
+            elif margin_pct >= 10:
+                score += 18
+            elif margin_pct >= 5:
+                score += 10
+            elif margin_pct > 0:
+                score += 5
+            # margin <= 0 → 0 bodů (prodáváme pod nákupní cenou)
+
+    if min_price is not None:
+        score += 10
+
+    if competitor_urls and len(competitor_urls) >= 1:
+        score += 15
+
+    return min(score, 100)
+
+
 def _enrich_with_price(product: Product, db: Session) -> dict:
-    """Přidej poslední cenu k produktu"""
+    """Přidej poslední cenu, marži a hero score k produktu."""
     price = db.query(Price).filter(
         Price.product_id == product.id
     ).order_by(desc(Price.changed_at)).first()
+
+    current_price = price.current_price if price else None
+    purchase_price = getattr(product, 'purchase_price', None)
+    min_price = getattr(product, 'min_price', None)
+    competitor_urls = product.competitor_urls or []
+
+    # Marže v procentech
+    margin = None
+    if current_price and purchase_price and current_price > 0:
+        margin = (current_price - purchase_price) / current_price * Decimal('100')
+        margin = round(margin, 2)
+
+    hero_score = _compute_hero_score(current_price, purchase_price, min_price, competitor_urls)
 
     return {
         'id': product.id,
@@ -39,10 +105,14 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
         'thumbnail_url': product.thumbnail_url,
         'url_reference': product.url_reference,
         'catalog_product_id': product.catalog_product_id,
-        'competitor_urls': product.competitor_urls,
-        'current_price': price.current_price if price else None,
+        'competitor_urls': competitor_urls,
+        'current_price': current_price,
         'old_price': price.old_price if price else None,
         'market': price.market if price else 'CZ',
+        'purchase_price': purchase_price,
+        'min_price': min_price,
+        'margin': margin,
+        'hero_score': hero_score,
         'created_at': product.created_at,
         'updated_at': product.updated_at,
     }
@@ -116,6 +186,23 @@ def update_product(product_id: UUID, product_update: ProductUpdate, db: Session 
 
     for key, value in product_update.model_dump(exclude_unset=True).items():
         setattr(product, key, value)
+
+    db.commit()
+    db.refresh(product)
+    return ProductResponse(**_enrich_with_price(product, db))
+
+
+@router.patch("/{product_id}/pricing", response_model=ProductResponse)
+def update_pricing(product_id: UUID, data: PricingUpdate, db: Session = Depends(get_db)):
+    """Nastav nákupní cenu a/nebo minimální cenu produktu."""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Produkt nenalezen")
+
+    if data.purchase_price is not None:
+        product.purchase_price = data.purchase_price
+    if data.min_price is not None:
+        product.min_price = data.min_price
 
     db.commit()
     db.refresh(product)
