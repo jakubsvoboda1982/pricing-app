@@ -198,6 +198,7 @@ export default function ProductsPage() {
             </div>
             <div className="flex-1">Produkt</div>
             <div className="w-36 text-right">Cena</div>
+            <div className="w-40 text-right">Konkurence</div>
             <div className="w-28 text-right">Marže</div>
             <div className="w-36 text-right">Hero Score</div>
             <div className="w-24 text-right">Akce</div>
@@ -278,6 +279,33 @@ export default function ProductsPage() {
                         </div>
                       ) : (
                         <span className="text-sm text-gray-400">— CZK</span>
+                      )}
+                    </div>
+
+                    {/* Competitors */}
+                    <div className="w-40 flex-shrink-0 flex flex-col items-end gap-1">
+                      {product.competitor_urls && product.competitor_urls.length > 0 ? (
+                        product.competitor_urls.map((cu) => (
+                          <a
+                            key={cu.url}
+                            href={cu.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={cu.url}
+                            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline max-w-full"
+                          >
+                            <ExternalLink size={11} className="flex-shrink-0" />
+                            <span className="truncate">{cu.name}</span>
+                          </a>
+                        ))
+                      ) : (
+                        <button
+                          onClick={() => navigate(`/products/${product.id}`)}
+                          className="text-xs text-gray-400 hover:text-blue-600 transition"
+                          title="Přidat konkurenci"
+                        >
+                          + Přidat
+                        </button>
                       )}
                     </div>
 

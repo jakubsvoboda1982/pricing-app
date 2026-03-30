@@ -146,10 +146,10 @@ export default function CatalogPage() {
       setAddedProducts(prev => new Set(prev).add(product.id))
       queryClient.invalidateQueries({ queryKey: ['products'] })
       queryClient.invalidateQueries({ queryKey: ['catalogProducts'] })
-      setTimeout(() => navigate('/products'), 800)
+      // Stay on this page, just show success state
     } catch {
+      // Still mark as added even if error (probably already exists)
       setAddedProducts(prev => new Set(prev).add(product.id))
-      setTimeout(() => navigate('/products'), 800)
     } finally {
       setAddingId(null)
     }
