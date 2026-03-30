@@ -54,6 +54,40 @@ def _get_company(db: Session) -> Company:
     return company
 
 
+def _sync_tracked_price(db: Session, catalog_product_id, price_vat, market: str):
+    """
+    If any tracked Product is linked to this catalog_product_id,
+    update (or create) its Price record with the VAT-inclusive selling price.
+    """
+    if price_vat is None:
+        return
+    from app.models import Product, Price
+    from sqlalchemy import desc
+    tracked = db.query(Product).filter(
+        Product.catalog_product_id == catalog_product_id
+    ).all()
+    for product in tracked:
+        latest = db.query(Price).filter(
+            Price.product_id == product.id,
+            Price.market == market,
+        ).order_by(desc(Price.changed_at)).first()
+        if latest:
+            # Only update if price actually changed
+            if latest.current_price != price_vat:
+                latest.old_price = latest.current_price
+                latest.current_price = price_vat
+                db.commit()
+        else:
+            new_price = Price(
+                product_id=product.id,
+                market=market,
+                currency='CZK' if market == 'CZ' else 'EUR',
+                current_price=price_vat,
+            )
+            db.add(new_price)
+            db.commit()
+
+
 def _find_existing_product(db: Session, ean: Optional[str], product_code: Optional[str], market: str, company_id) -> Optional[CatalogProduct]:
     """Najdi existující produkt podle EAN nebo PRODUCTNO"""
     if ean:
@@ -104,6 +138,7 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                 ean = product_data.get('ean')
                 product_code = product_data.get('product_code')
                 name = product_data.get('name')
+                price_vat = product_data.get('price_vat')  # Selling price with VAT
 
                 existing = _find_existing_product(db, ean, product_code, feed_sub.market, company.id)
 
@@ -123,6 +158,7 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                         existing.product_code = product_code
                     db.commit()
                     updated_count += 1
+                    _sync_tracked_price(db, existing.id, price_vat, feed_sub.market)
                 elif existing and not feed_sub.merge_existing:
                     skipped_count += 1
                 else:
@@ -148,6 +184,7 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                     db.add(catalog_product)
                     db.commit()
                     imported_count += 1
+                    _sync_tracked_price(db, catalog_product.id, price_vat, feed_sub.market)
             except Exception:
                 skipped_count += 1
                 continue
@@ -316,10 +353,8 @@ async def import_catalog_from_heureka(
         products, errors = parser.parse_string(xml_string, market=market)
 
         if not products and errors:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Chyba při parsování XML: {errors[0]['errors']}"
-            )
+            detail = "; ".join(str(e.get('errors', e)) for e in errors[:3])
+            raise HTTPException(status_code=400, detail=f"Chyba při parsování XML: {detail}")
 
         company = _get_company(db)
 
@@ -332,6 +367,7 @@ async def import_catalog_from_heureka(
                 ean = product_data.get('ean')
                 product_code = product_data.get('product_code')
                 name = product_data.get('name')
+                price_vat = product_data.get('price_vat')  # Selling price with VAT
 
                 existing = _find_existing_product(db, ean, product_code, market, company.id)
 
@@ -352,6 +388,7 @@ async def import_catalog_from_heureka(
                         existing.product_code = product_code
                     db.commit()
                     updated_count += 1
+                    _sync_tracked_price(db, existing.id, price_vat, market)
                 elif existing and not merge_existing:
                     skipped_count += 1
                 else:
@@ -377,6 +414,7 @@ async def import_catalog_from_heureka(
                     db.add(catalog_product)
                     db.commit()
                     imported_count += 1
+                    _sync_tracked_price(db, catalog_product.id, price_vat, market)
 
             except Exception:
                 skipped_count += 1
