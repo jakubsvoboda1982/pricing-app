@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Any
 from datetime import datetime
 from decimal import Decimal
+from uuid import UUID
 
 
 class CompetitorUrlItem(BaseModel):
@@ -43,31 +44,29 @@ class PriceUpdate(BaseModel):
 
 
 class ProductResponse(BaseModel):
-    id: str
+    id: UUID
     name: str
     sku: str
-    category: Optional[str]
-    description: Optional[str]
+    category: Optional[str] = None
+    description: Optional[str] = None
     ean: Optional[str] = None
     thumbnail_url: Optional[str] = None
     url_reference: Optional[str] = None
-    catalog_product_id: Optional[str] = None
+    catalog_product_id: Optional[UUID] = None
     competitor_urls: Optional[List[Any]] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class PriceResponse(BaseModel):
-    id: str
-    product_id: str
+    id: UUID
+    product_id: UUID
     market: str
     currency: str
     current_price: Decimal
-    old_price: Optional[Decimal]
+    old_price: Optional[Decimal] = None
     changed_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}

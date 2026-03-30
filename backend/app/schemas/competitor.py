@@ -1,4 +1,4 @@
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
@@ -12,43 +12,40 @@ class CompetitorPriceResponse(BaseModel):
     currency: str
     market: str
     recorded_at: datetime
-    last_checked: datetime
+    last_checked: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class CompetitorRankResponse(BaseModel):
     id: UUID
     rank: int
     positioning: str
-    category_rank: Optional[int]
-    score_reason: Optional[str]
+    category_rank: Optional[int] = None
+    score_reason: Optional[str] = None
     evaluated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class CompetitorAlertResponse(BaseModel):
     id: UUID
     alert_type: str
     title: str
-    description: Optional[str]
-    alert_data: Optional[dict]
+    description: Optional[str] = None
+    alert_data: Optional[dict] = None
     is_read: bool
     severity: str
     created_at: datetime
-    dismissed_at: Optional[datetime]
+    dismissed_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class CompetitorCreate(BaseModel):
     """Vytvoření nového konkurenta - vyžaduje URL a trh"""
-    url: str  # URL webových stránek konkurenta
-    market: str = "CZ"  # CZ nebo SK
+    url: str
+    market: str = "CZ"
 
 
 class CompetitorUpdate(BaseModel):
@@ -69,38 +66,36 @@ class CompetitorResponse(BaseModel):
     id: UUID
     name: str
     url: str
-    logo_url: Optional[str]
-    category: Optional[str]
+    logo_url: Optional[str] = None
+    category: Optional[str] = None
     market: str = "CZ"
-    description: Optional[str]
-    email: Optional[str]
-    phone: Optional[str]
-    address: Optional[str]
-    country: Optional[str]
+    description: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    country: Optional[str] = None
     is_active: bool
-    is_verified: bool
-    first_scrape_date: Optional[datetime]
-    last_scrape_date: Optional[datetime]
-    scrape_error: Optional[str]
-    scrape_attempts: int
-    scrape_failures: int
+    is_verified: bool = False
+    first_scrape_date: Optional[datetime] = None
+    last_scrape_date: Optional[datetime] = None
+    scrape_error: Optional[str] = None
+    scrape_attempts: int = 0
+    scrape_failures: int = 0
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class CompetitorDetailResponse(BaseModel):
     """Detailní informace s cenou, rankingem a upozorněními"""
     competitor: CompetitorResponse
-    latest_price: Optional[CompetitorPriceResponse]
-    latest_rank: Optional[CompetitorRankResponse]
-    unread_alerts: List[CompetitorAlertResponse]
-    recent_prices: List[CompetitorPriceResponse]  # Posledních N cen
+    latest_price: Optional[CompetitorPriceResponse] = None
+    latest_rank: Optional[CompetitorRankResponse] = None
+    unread_alerts: List[CompetitorAlertResponse] = []
+    recent_prices: List[CompetitorPriceResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class CompetitorListResponse(BaseModel):
@@ -108,15 +103,14 @@ class CompetitorListResponse(BaseModel):
     id: UUID
     name: str
     url: str
-    logo_url: Optional[str]
-    category: Optional[str]
+    logo_url: Optional[str] = None
+    category: Optional[str] = None
     market: str = "CZ"
     is_active: bool
-    last_scrape_date: Optional[datetime]
-    scrape_error: Optional[str]
-    latest_price: Optional[Decimal]
-    latest_rank: Optional[int]
-    unread_alerts_count: int
+    last_scrape_date: Optional[datetime] = None
+    scrape_error: Optional[str] = None
+    latest_price: Optional[Decimal] = None
+    latest_rank: Optional[int] = None
+    unread_alerts_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}

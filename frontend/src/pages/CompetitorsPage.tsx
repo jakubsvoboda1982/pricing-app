@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw, Trash2, ExternalLink, AlertCircle, TrendingUp } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { apiClient, API_BASE_URL } from '@/api/client'
 import MarketSelector from '@/components/MarketSelector'
 import { useMarketStore, shouldShowMarket } from '@/store/market'
@@ -29,6 +30,7 @@ export default function CompetitorsPage() {
   const [addError, setAddError] = useState('')
   const queryClient = useQueryClient()
   const selectedMarket = useMarketStore((state) => state.selectedMarket)
+  const navigate = useNavigate()
 
   // Načti konkurenty
   const { data: competitors = [], isLoading } = useQuery({
@@ -242,7 +244,12 @@ export default function CompetitorsPage() {
           filteredCompetitors.map((competitor: Competitor) => (
             <div
               key={competitor.id}
-              className="bg-white rounded-lg shadow-md hover:shadow-lg transition p-6 border-l-4 border-l-green-500"
+              className="bg-white rounded-lg shadow-md hover:shadow-lg transition p-6 border-l-4 border-l-green-500 cursor-pointer"
+              onClick={(e) => {
+                // Don't navigate when clicking action buttons
+                if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('a')) return
+                navigate(`/competitors/${competitor.id}`)
+              }}
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-start space-x-4 flex-1">

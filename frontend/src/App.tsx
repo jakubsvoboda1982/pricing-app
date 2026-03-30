@@ -20,6 +20,7 @@ import SimulatorPage from './pages/SimulatorPage'
 import SeasonalityPage from './pages/SeasonalityPage'
 import CatalogPage from './pages/CatalogPage'
 import CompetitorsPage from './pages/CompetitorsPage'
+import CompetitorDetailPage from './pages/CompetitorDetailPage'
 import { useAuthStore } from './store/auth'
 
 const queryClient = new QueryClient()
@@ -47,6 +48,7 @@ function AppRoutes() {
         <Route path="/products" element={<ProductsPage />} />
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/competitors" element={<CompetitorsPage />} />
+        <Route path="/competitors/:id" element={<CompetitorDetailPage />} />
         <Route path="/opportunities" element={<OpportunitiesPage />} />
         <Route path="/simulator" element={<SimulatorPage />} />
         <Route path="/seasonality" element={<SeasonalityPage />} />

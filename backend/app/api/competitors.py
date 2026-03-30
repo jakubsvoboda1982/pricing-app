@@ -258,47 +258,48 @@ async def rescrape_competitor(
     competitor_id: str,
     db: Session = Depends(get_db)
 ):
-    """Znovu stáhni metadata konkurenta z URL"""
+    """Znovu stáhni metadata konkurenta z URL (max 8s timeout)"""
+    import asyncio
 
     competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
-    # Stáhni nová metadata
-    try:
-        scrape_data = await scrape_competitor_metadata(competitor.url)
-    except Exception as e:
-        competitor.scrape_error = str(e)
-        competitor.scrape_failures += 1
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Scraping selhalo: {str(e)}"
-        )
-
-    # Aktualizuj konkurenta
-    competitor.name = scrape_data.get('name') or competitor.name
-    competitor.logo_url = scrape_data.get('logo_url') or competitor.logo_url
-    competitor.description = scrape_data.get('description') or competitor.description
-    competitor.email = scrape_data.get('emails', [None])[0] if scrape_data.get('emails') else competitor.email
-    competitor.phone = scrape_data.get('phones', [None])[0] if scrape_data.get('phones') else competitor.phone
-    competitor.address = scrape_data.get('address') or competitor.address
-    competitor.last_scrape_date = datetime.utcnow()
-    competitor.scrape_data = scrape_data
-    competitor.scrape_error = None
     competitor.scrape_attempts += 1
 
-    # Ulož nové ceny
-    if scrape_data.get('prices_found'):
-        for price in scrape_data['prices_found'][:5]:
-            competitor_price = CompetitorPrice(
-                competitor_id=competitor.id,
-                product_name="Aktualizováno",
-                price=Decimal(str(price)),
-                currency=scrape_data.get('country', 'CZK'),
-                market=scrape_data.get('country', 'CZ')
-            )
-            db.add(competitor_price)
+    # Stáhni nová metadata s max 8s timeoutem (bezpečné pro Railway)
+    try:
+        scrape_data = await asyncio.wait_for(
+            scrape_competitor_metadata(competitor.url, timeout=7),
+            timeout=8.0
+        )
+
+        # Aktualizuj konkurenta
+        competitor.name = scrape_data.get('name') or competitor.name
+        competitor.logo_url = scrape_data.get('logo_url') or competitor.logo_url
+        competitor.description = scrape_data.get('description') or competitor.description
+        competitor.email = scrape_data.get('emails', [None])[0] if scrape_data.get('emails') else competitor.email
+        competitor.phone = scrape_data.get('phones', [None])[0] if scrape_data.get('phones') else competitor.phone
+        competitor.address = scrape_data.get('address') or competitor.address
+        competitor.last_scrape_date = datetime.utcnow()
+        competitor.scrape_data = scrape_data
+        competitor.scrape_error = None
+
+        # Ulož nové ceny
+        if scrape_data.get('prices_found'):
+            for price in scrape_data['prices_found'][:5]:
+                competitor_price = CompetitorPrice(
+                    competitor_id=competitor.id,
+                    product_name="Aktualizováno",
+                    price=Decimal(str(price)),
+                    currency=scrape_data.get('country', 'CZK'),
+                    market=scrape_data.get('country', 'CZ')
+                )
+                db.add(competitor_price)
+
+    except (asyncio.TimeoutError, Exception) as e:
+        competitor.scrape_error = "Timeout - web neodpověděl" if isinstance(e, asyncio.TimeoutError) else str(e)
+        competitor.scrape_failures += 1
 
     db.commit()
     db.refresh(competitor)
