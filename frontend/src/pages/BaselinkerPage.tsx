@@ -63,6 +63,15 @@ export default function BaselinkerPage() {
     },
   })
 
+  const syncByEanMutation = useMutation({
+    mutationFn: () => apiClient.syncBaselinkerStockByEan(),
+    onSuccess: (data: { synced: number; not_found: number; message: string }) => {
+      setSyncResult(data)
+      qc.invalidateQueries({ queryKey: ['dashboardProducts'] })
+      qc.invalidateQueries({ queryKey: ['products'] })
+    },
+  })
+
   const handleSaveToken = () => {
     if (!token.trim()) return
     saveMutation.mutate({ api_token: token.trim(), inventory_id: config?.inventory_id ?? null })
@@ -143,45 +152,85 @@ export default function BaselinkerPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
           <h2 className="text-sm font-semibold text-gray-800">Katalog (inventář)</h2>
           <p className="text-xs text-gray-500">Vyberte katalog ze kterého se bude načítat skladovost.</p>
-          <div className="relative">
-            <select
-              value={config.inventory_id ?? ''}
-              onChange={(e) => {
-                const id = Number(e.target.value)
-                inventoryMutation.mutate(id)
+          <div className="flex gap-2 items-end">
+            <div className="flex-1 relative">
+              <select
+                value={selectedInventory ?? config.inventory_id ?? ''}
+                onChange={(e) => setSelectedInventory(Number(e.target.value) || null)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm appearance-none pr-8 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">-- Vyberte katalog --</option>
+                {inventories.map((inv) => (
+                  <option key={inv.inventory_id} value={inv.inventory_id}>
+                    {inv.name} (ID: {inv.inventory_id})
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-3 top-3 text-gray-400 pointer-events-none" />
+            </div>
+            <button
+              onClick={() => {
+                if (selectedInventory) {
+                  inventoryMutation.mutate(selectedInventory)
+                }
               }}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm appearance-none pr-8 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={!selectedInventory || inventoryMutation.isPending}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap"
             >
-              <option value="">-- Vyberte katalog --</option>
-              {inventories.map((inv) => (
-                <option key={inv.inventory_id} value={inv.inventory_id}>
-                  {inv.name} (ID: {inv.inventory_id})
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={14} className="absolute right-3 top-3 text-gray-400 pointer-events-none" />
+              {inventoryMutation.isPending ? 'Ukládám...' : 'Uložit'}
+            </button>
           </div>
+          {config.inventory_id && (
+            <p className="text-xs text-green-600 flex items-center gap-1">
+              <CheckCircle size={12} />
+              Vybraný katalog: ID {config.inventory_id}
+            </p>
+          )}
         </div>
       )}
 
       {/* Synchronizace skladovosti */}
       {hasConfig && config.inventory_id && (
         <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-800">Synchronizace skladovosti</h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Páruje se podle PRODUCTNO (SKU v Baselinker)
-              </p>
+          <h2 className="text-sm font-semibold text-gray-800">Synchronizace skladovosti</h2>
+          <p className="text-xs text-gray-500">Vyberte metodu párování produktů:</p>
+
+          <div className="space-y-3">
+            {/* SKU sync */}
+            <div className="border border-gray-200 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-800">Párování podle PRODUCTNO (SKU)</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Porovnává PRODUCTNO s SKU v Baselinker</p>
+                </div>
+                <button
+                  onClick={() => syncMutation.mutate()}
+                  disabled={syncMutation.isPending || syncByEanMutation.isPending}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-3 py-1.5 rounded text-sm font-medium transition"
+                >
+                  <RefreshCw size={13} className={syncMutation.isPending ? 'animate-spin' : ''} />
+                  {syncMutation.isPending ? 'Synchronizuji...' : 'Synchronizovat'}
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
-            >
-              <RefreshCw size={14} className={syncMutation.isPending ? 'animate-spin' : ''} />
-              {syncMutation.isPending ? 'Synchronizuji...' : 'Synchronizovat sklad'}
-            </button>
+
+            {/* EAN sync */}
+            <div className="border border-gray-200 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-800">Párování podle EAN</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Porovnává EAN se Baselinker EAN (přesnější)</p>
+                </div>
+                <button
+                  onClick={() => syncByEanMutation.mutate()}
+                  disabled={syncByEanMutation.isPending || syncMutation.isPending}
+                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white px-3 py-1.5 rounded text-sm font-medium transition"
+                >
+                  <RefreshCw size={13} className={syncByEanMutation.isPending ? 'animate-spin' : ''} />
+                  {syncByEanMutation.isPending ? 'Synchronizuji...' : 'Synchronizovat'}
+                </button>
+              </div>
+            </div>
           </div>
 
           {config.last_sync_at && (

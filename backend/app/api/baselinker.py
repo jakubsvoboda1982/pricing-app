@@ -69,7 +69,7 @@ def get_config(payload: dict = Depends(verify_token), db: Session = Depends(get_
 
 @router.post("/config")
 async def save_config(data: BaselinkerConfigIn, payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
-    """Uloží nebo aktualizuje Baselinker API token."""
+    """Uloží nebo aktualizuje Baselinker API token a/nebo inventory_id."""
     company_id = _get_company_id(payload, db)
 
     # Otestuj token
@@ -82,7 +82,8 @@ async def save_config(data: BaselinkerConfigIn, payload: dict = Depends(verify_t
     config = _get_config(company_id, db)
     if config:
         config.api_token = data.api_token
-        config.inventory_id = data.inventory_id
+        if data.inventory_id is not None:
+            config.inventory_id = data.inventory_id
         config.is_active = True
     else:
         config = BaselinkerConfig(
@@ -94,6 +95,19 @@ async def save_config(data: BaselinkerConfigIn, payload: dict = Depends(verify_t
     db.commit()
 
     return {"ok": True, "inventories": test["inventories"], "inventories_count": test["inventories_count"]}
+
+
+@router.post("/save-inventory", response_model=dict)
+async def save_inventory(data: BaselinkerConfigIn, payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
+    """Uloží vybraný katalog (inventory_id) do konfigurace."""
+    company_id = _get_company_id(payload, db)
+    config = _get_config(company_id, db)
+    if not config:
+        raise HTTPException(status_code=404, detail="Baselinker není nastaven")
+
+    config.inventory_id = data.inventory_id
+    db.commit()
+    return {"ok": True, "inventory_id": config.inventory_id, "message": "Katalog uložen"}
 
 
 @router.get("/inventories")
@@ -176,4 +190,70 @@ async def sync_stock(payload: dict = Depends(verify_token), db: Session = Depend
         not_found=not_found,
         errors=errors,
         message=f"Synchronizováno {synced} produktů, {not_found} nenalezeno v Baselinker",
+    )
+
+
+@router.post("/sync-by-ean", response_model=SyncResult)
+async def sync_by_ean(payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
+    """
+    Synchronizuje skladovost z Baselinker do sledovaných produktů.
+    Párování: products.ean = Baselinker EAN
+    """
+    company_id = _get_company_id(payload, db)
+    config = _get_config(company_id, db)
+    if not config:
+        raise HTTPException(status_code=404, detail="Baselinker není nastaven")
+    if not config.inventory_id:
+        raise HTTPException(status_code=400, detail="Není vybrán katalog (inventory_id)")
+
+    client = BaselinkerClient(config.api_token)
+
+    # Stáhni všechny produkty z Baselinker
+    try:
+        bl_products = await client.get_all_products(config.inventory_id)
+    except BaselinkerError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Vytvoř mapu EAN → Baselinker produkt (stock)
+    ean_to_stock: dict[str, int] = {}
+    for p in bl_products:
+        ean = p.get("ean", "").strip()
+        stock = p.get("stock", {})
+        # Sečti sklad ze všech skladů
+        total_stock = sum(v for v in stock.values() if isinstance(v, (int, float)))
+        if ean:
+            ean_to_stock[ean] = int(total_stock)
+
+    # Načti sledované produkty firmy
+    products = db.query(Product).filter(Product.company_id == company_id).all()
+
+    synced = 0
+    not_found = 0
+    errors = 0
+
+    for product in products:
+        # Páruj přes EAN
+        if not product.ean:
+            not_found += 1
+            continue
+
+        ean_key = product.ean.strip()
+        if ean_key in ean_to_stock:
+            try:
+                product.stock_quantity = ean_to_stock[ean_key]
+                synced += 1
+            except Exception:
+                errors += 1
+        else:
+            not_found += 1
+
+    # Ulož čas synchronizace
+    config.last_sync_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return SyncResult(
+        synced=synced,
+        not_found=not_found,
+        errors=errors,
+        message=f"Synchronizováno {synced} produktů (EAN match), {not_found} bez EAN nebo nenalezeno",
     )

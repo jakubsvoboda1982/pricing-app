@@ -302,6 +302,10 @@ export class APIClient {
   async syncBaselinkerStock() {
     return this.request('POST', '/baselinker/sync-stock')
   }
+
+  async syncBaselinkerStockByEan() {
+    return this.request('POST', '/baselinker/sync-by-ean')
+  }
 }
 
 export const apiClient = new APIClient()
