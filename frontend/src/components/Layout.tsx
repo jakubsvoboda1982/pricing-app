@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
-import { Menu, LogOut, BarChart3, Package, Users, AlertCircle, Download, Upload, Menu as MenuIcon, Shield, Zap, Calendar, ChevronRight, ArrowLeft } from 'lucide-react'
+import { Menu, LogOut, BarChart3, Package, Users, AlertCircle, Download, Upload, Menu as MenuIcon, Shield, Zap, Calendar, ChevronRight, ArrowLeft, Link2 } from 'lucide-react'
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -37,6 +37,12 @@ export default function Layout() {
         { id: 'competitors', label: 'Konkurence', icon: BarChart3, path: '/competitors' },
         { id: 'simulator', label: 'Simulátor co-když', icon: Zap, path: '/simulator' },
         { id: 'seasonality', label: 'Sezónní engine', icon: Calendar, path: '/seasonality' },
+      ]
+    },
+    {
+      section: 'INTEGRACE',
+      items: [
+        { id: 'baselinker', label: 'Baselinker', icon: Link2, path: '/baselinker' },
       ]
     },
     {

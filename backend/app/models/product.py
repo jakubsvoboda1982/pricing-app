@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, UniqueConstraint, Numeric
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, UniqueConstraint, Numeric, Integer
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID, JSON
 import uuid
@@ -31,6 +31,7 @@ class Product(Base):
     purchase_price_without_vat = Column(Numeric(12, 2), nullable=True)  # Nákupní cena bez DPH
     purchase_vat_rate = Column(Numeric(5, 2), nullable=True, default=12.00)  # DPH sazba nákupní ceny (CZ default 12%)
     min_price = Column(Numeric(12, 2), nullable=True)        # Minimální prodejní cena
+    stock_quantity = Column(Integer, nullable=True)           # Skladovost z Baselinker
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

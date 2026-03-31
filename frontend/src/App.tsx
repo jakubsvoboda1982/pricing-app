@@ -22,6 +22,7 @@ import CatalogPage from './pages/CatalogPage'
 import CompetitorsPage from './pages/CompetitorsPage'
 import ProductDetailPage from './pages/ProductDetailPage'
 import CompetitorDetailPage from './pages/CompetitorDetailPage'
+import BaselinkerPage from './pages/BaselinkerPage'
 import { useAuthStore } from './store/auth'
 
 const queryClient = new QueryClient()
@@ -58,6 +59,7 @@ function AppRoutes() {
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/import" element={<ImportPage />} />
         <Route path="/export" element={<ExportPage />} />
+        <Route path="/baselinker" element={<BaselinkerPage />} />
         <Route
           path="/admin/login-attempts"
           element={

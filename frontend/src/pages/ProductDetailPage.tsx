@@ -30,6 +30,7 @@ interface Product {
   margin?: number | null
   hero_score?: number | null
   lowest_competitor_price?: number | null
+  stock_quantity?: number | null
   created_at: string
 }
 
@@ -285,6 +286,15 @@ export default function ProductDetailPage() {
               </span>
             )}
             {product.ean && <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">EAN: {product.ean}</span>}
+            {product.stock_quantity != null && (
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                product.stock_quantity > 10 ? 'bg-green-100 text-green-700'
+                : product.stock_quantity > 0 ? 'bg-yellow-100 text-yellow-700'
+                : 'bg-red-100 text-red-700'
+              }`}>
+                📦 Sklad: {product.stock_quantity} ks
+              </span>
+            )}
           </div>
         </div>
       </div>

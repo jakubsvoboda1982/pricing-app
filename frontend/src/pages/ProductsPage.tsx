@@ -31,6 +31,7 @@ interface Product {
   margin?: number | null
   hero_score?: number | null
   lowest_competitor_price?: number | null
+  stock_quantity?: number | null
   created_at: string
 }
 
@@ -258,6 +259,15 @@ export default function ProductsPage() {
                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                           {product.product_code && (
                             <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-mono">#{product.product_code}</span>
+                          )}
+                          {product.stock_quantity != null && (
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                              product.stock_quantity > 10 ? 'bg-green-50 text-green-700'
+                              : product.stock_quantity > 0 ? 'bg-yellow-50 text-yellow-700'
+                              : 'bg-red-50 text-red-700'
+                            }`}>
+                              Sklad: {product.stock_quantity} ks
+                            </span>
                           )}
                           {product.category && (
                             <span className="text-xs text-gray-500">· {product.category}</span>

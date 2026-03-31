@@ -12,9 +12,10 @@ from .competitor_rank import CompetitorRank
 from .competitor_alert import CompetitorAlert
 from .feed_subscription import FeedSubscription
 from .competitor_product_price import CompetitorProductPrice, CompetitorPriceHistory
+from .baselinker import BaselinkerConfig
 
 __all__ = [
     "Company", "User", "Product", "Price", "AuditLog", "Analytics", "LoginAttempt",
     "CatalogProduct", "Competitor", "CompetitorPrice", "CompetitorRank", "CompetitorAlert",
-    "FeedSubscription", "CompetitorProductPrice", "CompetitorPriceHistory"
+    "FeedSubscription", "CompetitorProductPrice", "CompetitorPriceHistory", "BaselinkerConfig"
 ]

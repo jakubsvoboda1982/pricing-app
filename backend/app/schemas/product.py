@@ -87,6 +87,7 @@ class ProductResponse(BaseModel):
     hero_score: Optional[int] = None       # 0–100
     lowest_competitor_price: Optional[Decimal] = None  # Minimální cena od konkurence (s DPH)
     competitor_products: Optional[List[CompetitorProductPriceResponse]] = None  # Ceny od jednotlivých konkurentů
+    stock_quantity: Optional[int] = None  # Skladovost z Baselinker
     created_at: datetime
     updated_at: Optional[datetime] = None
 

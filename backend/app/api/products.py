@@ -162,6 +162,7 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
         'hero_score': hero_score,
         'lowest_competitor_price': lowest_competitor_price,
         'competitor_products': competitor_products,
+        'stock_quantity': getattr(product, 'stock_quantity', None),
         'created_at': product.created_at,
         'updated_at': product.updated_at,
     }

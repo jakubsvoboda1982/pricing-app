@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config import get_settings
 from app.database import Base, engine, SessionLocal
-from app.api import auth, products, users, audit, analytics, imports, exports, admin, opportunities, simulator, catalog, competitors, competitor_prices
+from app.api import auth, products, users, audit, analytics, imports, exports, admin, opportunities, simulator, catalog, competitors, competitor_prices, baselinker
 
 
 async def run_all_active_feeds():
@@ -88,6 +88,7 @@ app.include_router(simulator.router)
 app.include_router(catalog.router)
 app.include_router(competitors.router)
 app.include_router(competitor_prices.router)
+app.include_router(baselinker.router)
 
 @app.get("/health")
 def health_check():
