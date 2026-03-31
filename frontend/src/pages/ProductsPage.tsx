@@ -251,9 +251,11 @@ export default function ProductsPage() {
                         </div>
                       )}
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{product.name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-gray-900 truncate">{product.name}</p>
+                          <span className="text-xs font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded flex-shrink-0">{product.sku}</span>
+                        </div>
                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                          <span className="text-xs text-gray-400">{product.sku}</span>
                           {product.product_code && (
                             <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-mono">#{product.product_code}</span>
                           )}

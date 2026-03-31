@@ -272,9 +272,11 @@ export default function ProductDetailPage() {
           </div>
         )}
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{product.name}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">{product.name}</h1>
+            <span className="text-sm font-mono bg-gray-100 text-gray-700 px-2.5 py-1 rounded">SKU: {product.sku}</span>
+          </div>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <span className="text-sm text-gray-500">{product.sku}</span>
             {product.product_code && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-mono">PRODUCTNO: {product.product_code}</span>}
             {product.category && <span className="text-sm text-gray-500">· {product.category}</span>}
             {product.market && (
@@ -520,6 +522,14 @@ export default function ProductDetailPage() {
                       {getDomain(item.url)}
                     </a>
                   </div>
+                  {lowestCompetitorPrice != null && (
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-xs font-semibold text-gray-900">
+                        {lowestCompetitorPrice.toLocaleString('cs-CZ')} CZK
+                      </p>
+                      <p className="text-xs text-gray-400">konkurence</p>
+                    </div>
+                  )}
                   <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
                     item.market === 'CZ' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
                   }`}>{item.market === 'CZ' ? '🇨🇿' : '🇸🇰'}</span>

@@ -7,12 +7,16 @@ interface Product {
   id: string
   name: string
   sku: string
+  product_code?: string | null
   category?: string
   thumbnail_url?: string
   current_price?: number | null
-  purchase_price?: number | null
+  purchase_price_without_vat?: number | null
+  purchase_vat_rate?: number | null
+  purchase_price_with_vat?: number | null
   margin?: number | null
   hero_score?: number | null
+  lowest_competitor_price?: number | null
   market?: string
   competitor_urls?: { url: string; name: string; market: string }[]
 }
@@ -46,6 +50,11 @@ export default function DashboardPage() {
     (p) => !p.competitor_urls || p.competitor_urls.length === 0
   ).length
   const noPriceCount = products.filter((p) => p.current_price == null).length
+
+  const withCompetitorPrice = products.filter((p) => p.lowest_competitor_price != null)
+  const avgLowestCompetitorPrice = withCompetitorPrice.length
+    ? withCompetitorPrice.reduce((s, p) => s + Number(p.lowest_competitor_price), 0) / withCompetitorPrice.length
+    : null
 
   // Top 5 products by hero score
   const topProducts = [...products]
@@ -145,7 +154,7 @@ export default function DashboardPage() {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <div
           onClick={() => navigate('/products')}
           className="cursor-pointer bg-white border border-gray-200 rounded-xl p-5 hover:shadow-sm transition"
@@ -199,6 +208,29 @@ export default function DashboardPage() {
             <>
               <p className="text-3xl font-bold text-gray-300">—</p>
               <p className="text-xs text-gray-400 mt-1">Přidej ceny a nák. ceny</p>
+            </>
+          )}
+        </div>
+
+        <div
+          onClick={() => navigate('/products')}
+          className="cursor-pointer bg-white border border-gray-200 rounded-xl p-5 hover:shadow-sm transition"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ceny konkurence</p>
+            <BarChart2 size={16} className="text-cyan-500" />
+          </div>
+          {avgLowestCompetitorPrice != null ? (
+            <>
+              <p className="text-3xl font-bold text-gray-900">
+                {Number(avgLowestCompetitorPrice).toLocaleString('cs-CZ')}
+              </p>
+              <p className="text-xs text-gray-400 mt-1">průměr u {withCompetitorPrice.length} produktů</p>
+            </>
+          ) : (
+            <>
+              <p className="text-3xl font-bold text-gray-300">—</p>
+              <p className="text-xs text-gray-400 mt-1">Přidej URL konkurentů</p>
             </>
           )}
         </div>
