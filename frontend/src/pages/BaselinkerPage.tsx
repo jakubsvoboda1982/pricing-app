@@ -50,8 +50,11 @@ export default function BaselinkerPage() {
 
   const inventoryMutation = useMutation({
     mutationFn: (inventory_id: number) =>
-      apiClient.saveBaselinkerConfig({ api_token: '_keep_', inventory_id }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['baselinkerConfig'] }),
+      apiClient.saveBaselinkerInventory(inventory_id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['baselinkerConfig'] })
+      setSelectedInventory(null)
+    },
   })
 
   const syncMutation = useMutation({

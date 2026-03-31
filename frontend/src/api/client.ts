@@ -306,6 +306,10 @@ export class APIClient {
   async syncBaselinkerStockByEan() {
     return this.request('POST', '/baselinker/sync-by-ean')
   }
+
+  async saveBaselinkerInventory(inventory_id: number | null) {
+    return this.request('POST', '/baselinker/save-inventory', { inventory_id })
+  }
 }
 
 export const apiClient = new APIClient()

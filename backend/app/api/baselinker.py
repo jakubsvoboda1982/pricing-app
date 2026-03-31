@@ -197,7 +197,10 @@ async def sync_stock(payload: dict = Depends(verify_token), db: Session = Depend
 async def sync_by_ean(payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
     """
     Synchronizuje skladovost z Baselinker do sledovaných produktů.
-    Párování: products.ean = Baselinker EAN
+    Párování:
+    1. products.ean = Baselinker EAN (primární)
+    2. products.sku = Baselinker SKU (fallback)
+    3. products.product_code = Baselinker SKU (fallback)
     """
     company_id = _get_company_id(payload, db)
     config = _get_config(company_id, db)
@@ -214,15 +217,25 @@ async def sync_by_ean(payload: dict = Depends(verify_token), db: Session = Depen
     except BaselinkerError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Vytvoř mapu EAN → Baselinker produkt (stock)
+    # Vytvoř mapy pro párování
     ean_to_stock: dict[str, int] = {}
+    sku_to_stock: dict[str, int] = {}
+
     for p in bl_products:
-        ean = p.get("ean", "").strip()
         stock = p.get("stock", {})
         # Sečti sklad ze všech skladů
         total_stock = sum(v for v in stock.values() if isinstance(v, (int, float)))
+        total_stock = int(total_stock)
+
+        # EAN mapa
+        ean = p.get("ean", "").strip()
         if ean:
-            ean_to_stock[ean] = int(total_stock)
+            ean_to_stock[ean] = total_stock
+
+        # SKU mapa
+        sku = p.get("sku", "").strip()
+        if sku:
+            sku_to_stock[sku] = total_stock
 
     # Načti sledované produkty firmy
     products = db.query(Product).filter(Product.company_id == company_id).all()
@@ -232,15 +245,30 @@ async def sync_by_ean(payload: dict = Depends(verify_token), db: Session = Depen
     errors = 0
 
     for product in products:
-        # Páruj přes EAN
-        if not product.ean:
-            not_found += 1
-            continue
+        stock_value = None
 
-        ean_key = product.ean.strip()
-        if ean_key in ean_to_stock:
+        # 1. Zkus EAN
+        if product.ean:
+            ean_key = product.ean.strip()
+            if ean_key in ean_to_stock:
+                stock_value = ean_to_stock[ean_key]
+
+        # 2. Fallback: zkus SKU
+        if stock_value is None and product.sku:
+            sku_key = product.sku.strip()
+            if sku_key in sku_to_stock:
+                stock_value = sku_to_stock[sku_key]
+
+        # 3. Fallback: zkus product_code (PRODUCTNO)
+        if stock_value is None and product.product_code:
+            code_key = product.product_code.strip()
+            if code_key in sku_to_stock:
+                stock_value = sku_to_stock[code_key]
+
+        # Ulož výsledek
+        if stock_value is not None:
             try:
-                product.stock_quantity = ean_to_stock[ean_key]
+                product.stock_quantity = stock_value
                 synced += 1
             except Exception:
                 errors += 1
@@ -255,5 +283,5 @@ async def sync_by_ean(payload: dict = Depends(verify_token), db: Session = Depen
         synced=synced,
         not_found=not_found,
         errors=errors,
-        message=f"Synchronizováno {synced} produktů (EAN match), {not_found} bez EAN nebo nenalezeno",
+        message=f"Synchronizováno {synced} produktů (EAN/SKU/PRODUCTNO), {not_found} nenalezeno",
     )
