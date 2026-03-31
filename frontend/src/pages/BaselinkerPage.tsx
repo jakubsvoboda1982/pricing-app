@@ -24,26 +24,24 @@ export default function BaselinkerPage() {
 
   const { data: config, isLoading: configLoading } = useQuery<BaselinkerConfig | null>({
     queryKey: ['baselinkerConfig'],
-    queryFn: () => apiClient('/baselinker/config'),
+    queryFn: () => apiClient.getBaselinkerConfig(),
   })
 
   const { data: inventoriesData } = useQuery<{ inventories: Inventory[] }>({
     queryKey: ['baselinkerInventories'],
-    queryFn: () => apiClient('/baselinker/inventories'),
+    queryFn: () => apiClient.getBaselinkerInventories(),
     enabled: !!config,
     retry: false,
   })
 
   const saveMutation = useMutation({
-    mutationFn: async (data: { api_token: string; inventory_id: number | null }) => {
-      return apiClient('/baselinker/config', { method: 'POST', body: JSON.stringify(data) })
-    },
-    onSuccess: (data) => {
+    mutationFn: (data: { api_token: string; inventory_id: number | null }) =>
+      apiClient.saveBaselinkerConfig(data),
+    onSuccess: (data: { inventories?: Inventory[] }) => {
       qc.invalidateQueries({ queryKey: ['baselinkerConfig'] })
       qc.invalidateQueries({ queryKey: ['baselinkerInventories'] })
       setToken('')
       setShowTokenInput(false)
-      // Auto-select first inventory if not set
       if (data.inventories?.length === 1 && !config?.inventory_id) {
         setSelectedInventory(data.inventories[0].inventory_id)
       }
@@ -51,18 +49,14 @@ export default function BaselinkerPage() {
   })
 
   const inventoryMutation = useMutation({
-    mutationFn: async (inventory_id: number) => {
-      return apiClient('/baselinker/config', {
-        method: 'POST',
-        body: JSON.stringify({ api_token: '_keep_', inventory_id }),
-      })
-    },
+    mutationFn: (inventory_id: number) =>
+      apiClient.saveBaselinkerConfig({ api_token: '_keep_', inventory_id }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['baselinkerConfig'] }),
   })
 
   const syncMutation = useMutation({
-    mutationFn: () => apiClient('/baselinker/sync-stock', { method: 'POST' }),
-    onSuccess: (data) => {
+    mutationFn: () => apiClient.syncBaselinkerStock(),
+    onSuccess: (data: { synced: number; not_found: number; message: string }) => {
       setSyncResult(data)
       qc.invalidateQueries({ queryKey: ['dashboardProducts'] })
       qc.invalidateQueries({ queryKey: ['products'] })

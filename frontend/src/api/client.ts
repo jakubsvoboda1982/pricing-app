@@ -285,6 +285,23 @@ export class APIClient {
 
     return response.json()
   }
+
+  // Baselinker
+  async getBaselinkerConfig() {
+    return this.request('GET', '/baselinker/config')
+  }
+
+  async saveBaselinkerConfig(data: { api_token: string; inventory_id: number | null }) {
+    return this.request('POST', '/baselinker/config', data)
+  }
+
+  async getBaselinkerInventories() {
+    return this.request('GET', '/baselinker/inventories')
+  }
+
+  async syncBaselinkerStock() {
+    return this.request('POST', '/baselinker/sync-stock')
+  }
 }
 
 export const apiClient = new APIClient()

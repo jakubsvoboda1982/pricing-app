@@ -598,7 +598,7 @@ export default function ProductDetailPage() {
             {heroScore < 60 && (
               <div className="mt-3 p-2.5 bg-orange-50 rounded-lg text-xs text-orange-700">
                 {!currentPrice && '• Nastav prodejní cenu. '}
-                {!purchasePrice && '• Nastav nákupní cenu pro výpočet marže. '}
+                {!purchasePriceWithVat && '• Nastav nákupní cenu pro výpočet marže. '}
                 {competitorUrls.length === 0 && '• Přidej URL konkurenta pro sledování cen.'}
               </div>
             )}
