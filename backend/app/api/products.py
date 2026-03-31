@@ -22,6 +22,7 @@ class CompetitorUrlAdd(BaseModel):
 class PricingUpdate(BaseModel):
     purchase_price_without_vat: Optional[Decimal] = None  # Nákupní cena bez DPH
     purchase_vat_rate: Optional[Decimal] = None           # Sazba DPH (default 12 pro CZ)
+    manufacturing_cost: Optional[Decimal] = None          # Výrobní cena
     min_price: Optional[Decimal] = None
 
 
@@ -255,6 +256,8 @@ def update_pricing(product_id: UUID, data: PricingUpdate, db: Session = Depends(
         product.purchase_price_without_vat = data.purchase_price_without_vat
     if data.purchase_vat_rate is not None:
         product.purchase_vat_rate = data.purchase_vat_rate
+    if data.manufacturing_cost is not None:
+        product.manufacturing_cost = data.manufacturing_cost
     if data.min_price is not None:
         product.min_price = data.min_price
 

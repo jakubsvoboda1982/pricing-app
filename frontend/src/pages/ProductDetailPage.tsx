@@ -26,6 +26,7 @@ interface Product {
   purchase_price_without_vat?: number | null
   purchase_vat_rate?: number | null
   purchase_price_with_vat?: number | null
+  manufacturing_cost?: number | null
   min_price?: number | null
   margin?: number | null
   hero_score?: number | null
@@ -123,7 +124,7 @@ export default function ProductDetailPage() {
   const [showPriceForm, setShowPriceForm] = useState(false)
   const [priceForm, setPriceForm] = useState({ current_price: '', old_price: '', market: 'CZ' })
   const [showPricingForm, setShowPricingForm] = useState(false)
-  const [pricingForm, setPricingForm] = useState({ purchase_price_without_vat: '', purchase_vat_rate: '', min_price: '' })
+  const [pricingForm, setPricingForm] = useState({ purchase_price_without_vat: '', purchase_vat_rate: '', manufacturing_cost: '', min_price: '' })
   const [showAddUrl, setShowAddUrl] = useState(false)
   const [newUrl, setNewUrl] = useState('')
   const [newUrlMarket, setNewUrlMarket] = useState<'CZ' | 'SK'>('CZ')
@@ -167,7 +168,7 @@ export default function ProductDetailPage() {
   })
 
   const setPricingMutation = useMutation({
-    mutationFn: async (data: { purchase_price_without_vat?: number; purchase_vat_rate?: number; min_price?: number }) => {
+    mutationFn: async (data: { purchase_price_without_vat?: number; purchase_vat_rate?: number; manufacturing_cost?: number; min_price?: number }) => {
       const res = await fetch(`${API_BASE_URL}/products/${id}/pricing`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -219,11 +220,13 @@ export default function ProductDetailPage() {
   const handleSetPricing = () => {
     const ppwv = pricingForm.purchase_price_without_vat ? parseFloat(pricingForm.purchase_price_without_vat.replace(',', '.')) : undefined
     const pvr = pricingForm.purchase_vat_rate ? parseFloat(pricingForm.purchase_vat_rate.replace(',', '.')) : undefined
+    const mc = pricingForm.manufacturing_cost ? parseFloat(pricingForm.manufacturing_cost.replace(',', '.')) : undefined
     const mp = pricingForm.min_price ? parseFloat(pricingForm.min_price.replace(',', '.')) : undefined
-    if (!ppwv && !pvr && !mp) return
+    if (!ppwv && !pvr && !mc && !mp) return
     setPricingMutation.mutate({
       ...(ppwv !== undefined && { purchase_price_without_vat: ppwv }),
       ...(pvr !== undefined && { purchase_vat_rate: pvr }),
+      ...(mc !== undefined && { manufacturing_cost: mc }),
       ...(mp !== undefined && { min_price: mp }),
     })
   }
@@ -430,8 +433,8 @@ export default function ProductDetailPage() {
           {/* Pricing edit form (purchase price + min price) */}
           {showPricingForm && (
             <div className="p-3 bg-gray-50 rounded-lg space-y-3 border border-gray-200">
-              <p className="text-xs font-medium text-gray-700">Nákupní cena (bez DPH) a sazba DPH</p>
-              <div className="grid grid-cols-3 gap-2">
+              <p className="text-xs font-medium text-gray-700">Cenotvorba: nákupní cena, DPH, výrobní cena a minimální cena</p>
+              <div className="grid grid-cols-4 gap-2">
                 <div>
                   <label className="text-xs text-gray-600">Nákupní cena bez DPH *</label>
                   <input type="text" value={pricingForm.purchase_price_without_vat}
@@ -444,6 +447,13 @@ export default function ProductDetailPage() {
                   <input type="text" value={pricingForm.purchase_vat_rate}
                     onChange={(e) => setPricingForm(p => ({ ...p, purchase_vat_rate: e.target.value }))}
                     placeholder={fmt(purchaseVatRate, 0)}
+                    className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600">Výrobní cena</label>
+                  <input type="text" value={pricingForm.manufacturing_cost}
+                    onChange={(e) => setPricingForm(p => ({ ...p, manufacturing_cost: e.target.value }))}
+                    placeholder="150.00"
                     className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>

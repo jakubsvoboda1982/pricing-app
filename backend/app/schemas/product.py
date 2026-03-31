@@ -80,6 +80,7 @@ class ProductResponse(BaseModel):
     # Cenotvorba - purchase price without VAT + VAT rate
     purchase_price_without_vat: Optional[Decimal] = None
     purchase_vat_rate: Optional[Decimal] = None  # Default 12 for CZ
+    manufacturing_cost: Optional[Decimal] = None
     min_price: Optional[Decimal] = None
     # Vypočítané hodnoty
     purchase_price_with_vat: Optional[Decimal] = None  # Computed: purchase_price_without_vat * (1 + purchase_vat_rate/100)

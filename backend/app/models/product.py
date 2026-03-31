@@ -30,6 +30,7 @@ class Product(Base):
     # Cenotvorba
     purchase_price_without_vat = Column(Numeric(12, 2), nullable=True)  # Nákupní cena bez DPH
     purchase_vat_rate = Column(Numeric(5, 2), nullable=True, default=12.00)  # DPH sazba nákupní ceny (CZ default 12%)
+    manufacturing_cost = Column(Numeric(12, 2), nullable=True)  # Výrobní cena
     min_price = Column(Numeric(12, 2), nullable=True)        # Minimální prodejní cena
     stock_quantity = Column(Integer, nullable=True)           # Skladovost z Baselinker
 
