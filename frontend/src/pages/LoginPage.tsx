@@ -85,7 +85,10 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="text-slate-400 text-sm">© 2026 Nuties Pricing Monitor. All rights reserved.</p>
+        <div className="flex flex-col items-start space-y-1">
+          <p className="text-slate-400 text-sm">© 2026 Nuties Pricing Monitor. All rights reserved.</p>
+          <p className="text-slate-500 text-xs">Build: {__GIT_COMMIT__}</p>
+        </div>
       </div>
 
       {/* Right Side - Login Form */}
@@ -95,6 +98,7 @@ export default function LoginPage() {
           <div className="lg:hidden mb-8">
             <h1 className="text-3xl font-bold text-gray-900">Nuties</h1>
             <p className="text-gray-600">Pricing Monitor</p>
+            <p className="text-gray-500 text-xs mt-1">Build: {__GIT_COMMIT__}</p>
           </div>
 
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Přihlaste se</h2>

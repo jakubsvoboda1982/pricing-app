@@ -4,6 +4,11 @@ import path from 'path'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  define: {
+    __GIT_COMMIT__: JSON.stringify(
+      (process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT || 'dev').slice(0, 7)
+    ),
+  },
   plugins: [react()],
   resolve: {
     alias: {

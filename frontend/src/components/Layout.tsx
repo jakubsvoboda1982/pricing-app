@@ -86,7 +86,12 @@ export default function Layout() {
         } bg-slate-900 text-white transition-all duration-300 flex flex-col shadow-lg`}
       >
         <div className="p-4 flex items-center justify-between border-b border-slate-700">
-          {sidebarOpen && <h1 className="text-xl font-bold">Nuties</h1>}
+          {sidebarOpen && (
+            <div className="flex flex-col">
+              <h1 className="text-xl font-bold">Nuties</h1>
+              <span className="text-xs text-slate-400">Build: {__GIT_COMMIT__}</span>
+            </div>
+          )}
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="hover:bg-slate-700 p-2 rounded transition"
