@@ -22,10 +22,13 @@ interface Product {
   current_price?: number | null
   old_price?: number | null
   market?: string
-  purchase_price?: number | null
+  purchase_price_without_vat?: number | null
+  purchase_vat_rate?: number | null
+  purchase_price_with_vat?: number | null
   min_price?: number | null
   margin?: number | null
   hero_score?: number | null
+  lowest_competitor_price?: number | null
   created_at: string
 }
 
@@ -118,7 +121,7 @@ export default function ProductDetailPage() {
   const [showPriceForm, setShowPriceForm] = useState(false)
   const [priceForm, setPriceForm] = useState({ current_price: '', old_price: '', market: 'CZ' })
   const [showPricingForm, setShowPricingForm] = useState(false)
-  const [pricingForm, setPricingForm] = useState({ purchase_price: '', min_price: '' })
+  const [pricingForm, setPricingForm] = useState({ purchase_price_without_vat: '', purchase_vat_rate: '', min_price: '' })
   const [showAddUrl, setShowAddUrl] = useState(false)
   const [newUrl, setNewUrl] = useState('')
   const [newUrlMarket, setNewUrlMarket] = useState<'CZ' | 'SK'>('CZ')
@@ -162,7 +165,7 @@ export default function ProductDetailPage() {
   })
 
   const setPricingMutation = useMutation({
-    mutationFn: async (data: { purchase_price?: number; min_price?: number }) => {
+    mutationFn: async (data: { purchase_price_without_vat?: number; purchase_vat_rate?: number; min_price?: number }) => {
       const res = await fetch(`${API_BASE_URL}/products/${id}/pricing`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -212,11 +215,13 @@ export default function ProductDetailPage() {
   }
 
   const handleSetPricing = () => {
-    const pp = pricingForm.purchase_price ? parseFloat(pricingForm.purchase_price.replace(',', '.')) : undefined
+    const ppwv = pricingForm.purchase_price_without_vat ? parseFloat(pricingForm.purchase_price_without_vat.replace(',', '.')) : undefined
+    const pvr = pricingForm.purchase_vat_rate ? parseFloat(pricingForm.purchase_vat_rate.replace(',', '.')) : undefined
     const mp = pricingForm.min_price ? parseFloat(pricingForm.min_price.replace(',', '.')) : undefined
-    if (!pp && !mp) return
+    if (!ppwv && !pvr && !mp) return
     setPricingMutation.mutate({
-      ...(pp !== undefined && { purchase_price: pp }),
+      ...(ppwv !== undefined && { purchase_price_without_vat: ppwv }),
+      ...(pvr !== undefined && { purchase_vat_rate: pvr }),
       ...(mp !== undefined && { min_price: mp }),
     })
   }
@@ -226,8 +231,11 @@ export default function ProductDetailPage() {
   }
 
   const currentPrice = product.current_price != null ? Number(product.current_price) : null
-  const purchasePrice = product.purchase_price != null ? Number(product.purchase_price) : null
+  const purchasePriceWithoutVat = product.purchase_price_without_vat != null ? Number(product.purchase_price_without_vat) : null
+  const purchaseVatRate = product.purchase_vat_rate != null ? Number(product.purchase_vat_rate) : 12
+  const purchasePriceWithVat = product.purchase_price_with_vat != null ? Number(product.purchase_price_with_vat) : null
   const minPrice = product.min_price != null ? Number(product.min_price) : null
+  const lowestCompetitorPrice = product.lowest_competitor_price != null ? Number(product.lowest_competitor_price) : null
   const margin = product.margin != null ? Number(product.margin) : null
   const heroScore = product.hero_score ?? 0
   const competitorUrls = product.competitor_urls || []
@@ -235,7 +243,7 @@ export default function ProductDetailPage() {
 
   // Hero Score breakdown
   const priceSet = currentPrice != null ? 25 : 0
-  const purchaseSet = purchasePrice != null ? 15 : 0
+  const purchaseSet = purchasePriceWithVat != null ? 15 : 0
   const competitorSet = competitorUrls.length >= 1 ? 15 : 0
   const minSet = minPrice != null ? 10 : 0
   const marginPts = heroScore - priceSet - purchaseSet - competitorSet - minSet
@@ -357,11 +365,14 @@ export default function ProductDetailPage() {
             {/* Purchase price + min price row */}
             <div className="flex items-center justify-between py-2 border-b border-gray-50 group">
               <span className="text-sm text-gray-500 flex items-center gap-1.5">
-                <ShoppingCart size={13} className="text-gray-400" /> Nákupní cena
+                <ShoppingCart size={13} className="text-gray-400" /> Nákupní cena (bez DPH)
               </span>
               <div className="flex items-center gap-2">
-                {purchasePrice != null ? (
-                  <span className="text-sm font-medium text-gray-800">{fmt(purchasePrice)} CZK</span>
+                {purchasePriceWithoutVat != null ? (
+                  <div className="text-right">
+                    <span className="text-sm font-medium text-gray-800">{fmt(purchasePriceWithoutVat)} CZK</span>
+                    <p className="text-xs text-gray-400">DPH: {fmt(purchaseVatRate, 0)}% → {fmt(purchasePriceWithVat)} CZK s DPH</p>
+                  </div>
                 ) : (
                   <span className="text-xs text-gray-400">Nenastaveno</span>
                 )}
@@ -405,13 +416,20 @@ export default function ProductDetailPage() {
           {/* Pricing edit form (purchase price + min price) */}
           {showPricingForm && (
             <div className="p-3 bg-gray-50 rounded-lg space-y-3 border border-gray-200">
-              <p className="text-xs font-medium text-gray-700">Nákupní a minimální cena</p>
-              <div className="grid grid-cols-2 gap-2">
+              <p className="text-xs font-medium text-gray-700">Nákupní cena (bez DPH) a sazba DPH</p>
+              <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="text-xs text-gray-600">Nákupní cena</label>
-                  <input type="text" value={pricingForm.purchase_price}
-                    onChange={(e) => setPricingForm(p => ({ ...p, purchase_price: e.target.value }))}
-                    placeholder={purchasePrice != null ? fmt(purchasePrice) : '200.00'}
+                  <label className="text-xs text-gray-600">Nákupní cena bez DPH *</label>
+                  <input type="text" value={pricingForm.purchase_price_without_vat}
+                    onChange={(e) => setPricingForm(p => ({ ...p, purchase_price_without_vat: e.target.value }))}
+                    placeholder={purchasePriceWithoutVat != null ? fmt(purchasePriceWithoutVat) : '200.00'}
+                    className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600">Sazba DPH (%)</label>
+                  <input type="text" value={pricingForm.purchase_vat_rate}
+                    onChange={(e) => setPricingForm(p => ({ ...p, purchase_vat_rate: e.target.value }))}
+                    placeholder={fmt(purchaseVatRate, 0)}
                     className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
@@ -422,6 +440,7 @@ export default function ProductDetailPage() {
                     className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
+              <p className="text-xs text-gray-500">* CZ potraviny obvykle 12%, ostatní položky 21%</p>
               <div className="flex gap-2">
                 <button onClick={handleSetPricing} disabled={setPricingMutation.isPending}
                   className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs disabled:opacity-50">
@@ -442,6 +461,18 @@ export default function ProductDetailPage() {
               <Plus size={13} /> Přidat URL
             </button>
           </div>
+
+          {lowestCompetitorPrice != null && (
+            <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
+              <p className="text-xs text-gray-600 mb-1">Nejnižší cena konkurence:</p>
+              <p className="text-lg font-bold text-blue-700">{lowestCompetitorPrice.toLocaleString('cs-CZ')} CZK</p>
+              {currentPrice != null && (
+                <p className="text-xs text-gray-600 mt-1">
+                  {currentPrice > lowestCompetitorPrice ? '↑' : '↓'} {Math.abs(currentPrice - lowestCompetitorPrice).toLocaleString('cs-CZ')} CZK od nejnižší ceny
+                </p>
+              )}
+            </div>
+          )}
 
           {showAddUrl && (
             <div className="mb-4 p-3 bg-blue-50 rounded-lg space-y-2">

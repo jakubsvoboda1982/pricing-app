@@ -23,10 +23,13 @@ interface Product {
   current_price?: number | null
   old_price?: number | null
   market?: string
-  purchase_price?: number | null
+  purchase_price_without_vat?: number | null
+  purchase_vat_rate?: number | null
+  purchase_price_with_vat?: number | null
   min_price?: number | null
   margin?: number | null
   hero_score?: number | null
+  lowest_competitor_price?: number | null
   created_at: string
 }
 
@@ -283,21 +286,34 @@ export default function ProductsPage() {
                     </div>
 
                     {/* Competitors */}
-                    <div className="w-40 flex-shrink-0 flex flex-col items-end gap-1">
+                    <div className="w-40 flex-shrink-0 flex flex-col items-end gap-1.5">
+                      {product.lowest_competitor_price != null && (
+                        <div className="text-right">
+                          <p className="text-xs text-gray-400">Konkurence:</p>
+                          <span className="text-sm font-semibold text-gray-900">
+                            {Number(product.lowest_competitor_price).toLocaleString('cs-CZ')} CZK
+                          </span>
+                        </div>
+                      )}
                       {product.competitor_urls && product.competitor_urls.length > 0 ? (
-                        product.competitor_urls.map((cu) => (
-                          <a
-                            key={cu.url}
-                            href={cu.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={cu.url}
-                            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline max-w-full"
-                          >
-                            <ExternalLink size={11} className="flex-shrink-0" />
-                            <span className="truncate">{cu.name}</span>
-                          </a>
-                        ))
+                        <div className="space-y-0.5 w-full">
+                          {product.competitor_urls.slice(0, 2).map((cu) => (
+                            <a
+                              key={cu.url}
+                              href={cu.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={cu.url}
+                              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline max-w-full justify-end"
+                            >
+                              <ExternalLink size={11} className="flex-shrink-0" />
+                              <span className="truncate">{cu.name}</span>
+                            </a>
+                          ))}
+                          {product.competitor_urls.length > 2 && (
+                            <p className="text-xs text-gray-400 text-right">+{product.competitor_urls.length - 2} další</p>
+                          )}
+                        </div>
                       ) : (
                         <button
                           onClick={() => navigate(`/products/${product.id}`)}
