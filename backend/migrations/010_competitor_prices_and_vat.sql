@@ -1,9 +1,12 @@
 -- Migration 010: Add competitor price tracking and refactor purchase_price with VAT
 -- This migration:
--- 1. Adds purchase_vat_rate to products (default 12 for CZ food items)
--- 2. Renames purchase_price to purchase_price_without_vat (conceptually)
--- 3. Creates competitor_prices table for tracking competitor prices by URL
+-- 1. Renames purchase_price to purchase_price_without_vat
+-- 2. Adds purchase_vat_rate to products (default 12 for CZ food items)
+-- 3. Creates competitor_product_prices table for tracking competitor prices by URL
 -- 4. Creates competitor_price_history table for historical tracking
+
+-- Rename purchase_price to purchase_price_without_vat (if migration 009 already created it)
+ALTER TABLE products RENAME COLUMN IF EXISTS purchase_price TO purchase_price_without_vat;
 
 -- Add VAT rate column for purchase price (default 12% for Czech food items)
 ALTER TABLE products ADD COLUMN IF NOT EXISTS purchase_vat_rate NUMERIC(5, 2) DEFAULT 12.00 NULL;
