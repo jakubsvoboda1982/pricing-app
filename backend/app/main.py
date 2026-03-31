@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config import get_settings
 from app.database import Base, engine, SessionLocal
-from app.api import auth, products, users, audit, analytics, imports, exports, admin, opportunities, simulator, catalog, competitors
+from app.api import auth, products, users, audit, analytics, imports, exports, admin, opportunities, simulator, catalog, competitors, competitor_prices
 
 
 async def run_all_active_feeds():
@@ -23,6 +23,17 @@ async def run_all_active_feeds():
         db.close()
 
 
+async def update_competitor_prices_scheduled():
+    """Aktualizuj ceny konkurence (spouštěno schedulérem 1x týdně)"""
+    from app.competitor_scraper import update_all_competitor_prices
+
+    try:
+        result = await update_all_competitor_prices()
+        print(f"[Scheduler] Aktualizace cen konkurence: {result['message']}")
+    except Exception as e:
+        print(f"[Scheduler] Chyba při aktualizaci cen konkurence: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -30,8 +41,11 @@ async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
     # Spusť každý den v 02:00 UTC
     scheduler.add_job(run_all_active_feeds, 'cron', hour=2, minute=0)
+    # Spusť každý týden v pondělí v 03:00 UTC
+    scheduler.add_job(update_competitor_prices_scheduled, 'cron', day_of_week=0, hour=3, minute=0)
     scheduler.start()
     print("[Scheduler] Denní načítání feedů aktivováno (02:00 UTC)")
+    print("[Scheduler] Týdenní aktualizace cen konkurence aktivována (pondělí 03:00 UTC)")
     yield
     # Shutdown
     scheduler.shutdown()
@@ -73,6 +87,7 @@ app.include_router(opportunities.router)
 app.include_router(simulator.router)
 app.include_router(catalog.router)
 app.include_router(competitors.router)
+app.include_router(competitor_prices.router)
 
 @app.get("/health")
 def health_check():

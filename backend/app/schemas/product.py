@@ -43,6 +43,24 @@ class PriceUpdate(BaseModel):
     old_price: Optional[Decimal] = None
 
 
+class CompetitorProductPriceResponse(BaseModel):
+    """Competitor price tracking for a single URL"""
+    id: Optional[UUID] = None
+    product_id: Optional[UUID] = None
+    competitor_url: str
+    price: Optional[Decimal] = None  # Price with VAT
+    currency: str = "CZK"
+    market: str = "CZ"
+    last_fetched_at: Optional[datetime] = None
+    next_update_at: Optional[datetime] = None
+    fetch_status: Optional[str] = None  # 'success' | 'error' | 'pending'
+    fetch_error: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
 class ProductResponse(BaseModel):
     id: UUID
     name: str
@@ -58,12 +76,16 @@ class ProductResponse(BaseModel):
     current_price: Optional[Decimal] = None
     old_price: Optional[Decimal] = None
     market: Optional[str] = None
-    # Cenotvorba
-    purchase_price: Optional[Decimal] = None
+    # Cenotvorba - purchase price without VAT + VAT rate
+    purchase_price_without_vat: Optional[Decimal] = None
+    purchase_vat_rate: Optional[Decimal] = None  # Default 12 for CZ
     min_price: Optional[Decimal] = None
     # Vypočítané hodnoty
-    margin: Optional[Decimal] = None       # Marže v % = (current - purchase) / current * 100
+    purchase_price_with_vat: Optional[Decimal] = None  # Computed: purchase_price_without_vat * (1 + purchase_vat_rate/100)
+    margin: Optional[Decimal] = None       # Marže v % = (current - purchase_with_vat) / current * 100
     hero_score: Optional[int] = None       # 0–100
+    lowest_competitor_price: Optional[Decimal] = None  # Minimální cena od konkurence (s DPH)
+    competitor_products: Optional[List[CompetitorProductPriceResponse]] = None  # Ceny od jednotlivých konkurentů
     created_at: datetime
     updated_at: Optional[datetime] = None
 

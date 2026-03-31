@@ -27,7 +27,8 @@ class Product(Base):
     competitor_urls = Column(JSON, nullable=True, default=list)
 
     # Cenotvorba
-    purchase_price = Column(Numeric(12, 2), nullable=True)  # Nákupní cena
+    purchase_price_without_vat = Column(Numeric(12, 2), nullable=True)  # Nákupní cena bez DPH
+    purchase_vat_rate = Column(Numeric(5, 2), nullable=True, default=12.00)  # DPH sazba nákupní ceny (CZ default 12%)
     min_price = Column(Numeric(12, 2), nullable=True)        # Minimální prodejní cena
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

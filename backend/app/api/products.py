@@ -20,7 +20,8 @@ class CompetitorUrlAdd(BaseModel):
 
 
 class PricingUpdate(BaseModel):
-    purchase_price: Optional[Decimal] = None
+    purchase_price_without_vat: Optional[Decimal] = None  # Nákupní cena bez DPH
+    purchase_vat_rate: Optional[Decimal] = None           # Sazba DPH (default 12 pro CZ)
     min_price: Optional[Decimal] = None
 
 
@@ -31,7 +32,7 @@ def _get_domain_name(url: str) -> str:
 
 def _compute_hero_score(
     current_price: Optional[Decimal],
-    purchase_price: Optional[Decimal],
+    purchase_price_with_vat: Optional[Decimal],
     min_price: Optional[Decimal],
     competitor_urls: Optional[list],
 ) -> int:
@@ -50,11 +51,11 @@ def _compute_hero_score(
     if current_price is not None:
         score += 25
 
-    if purchase_price is not None:
+    if purchase_price_with_vat is not None:
         score += 15
-        # Marže = (prodejní - nákupní) / prodejní * 100
+        # Marže = (prodejní - nákupní_s_DPH) / prodejní * 100
         if current_price and current_price > 0:
-            margin_pct = (current_price - purchase_price) / current_price * 100
+            margin_pct = (current_price - purchase_price_with_vat) / current_price * 100
             if margin_pct >= 30:
                 score += 35
             elif margin_pct >= 20:
@@ -78,22 +79,65 @@ def _compute_hero_score(
 
 def _enrich_with_price(product: Product, db: Session) -> dict:
     """Přidej poslední cenu, marži a hero score k produktu."""
+    from app.models import CompetitorProductPrice
+
     price = db.query(Price).filter(
         Price.product_id == product.id
     ).order_by(desc(Price.changed_at)).first()
 
     current_price = price.current_price if price else None
-    purchase_price = getattr(product, 'purchase_price', None)
+    purchase_price_without_vat = getattr(product, 'purchase_price_without_vat', None)
+    purchase_vat_rate = getattr(product, 'purchase_vat_rate', Decimal('12.00'))
     min_price = getattr(product, 'min_price', None)
     competitor_urls = product.competitor_urls or []
 
-    # Marže v procentech
+    # Calculate purchase price with VAT
+    purchase_price_with_vat = None
+    if purchase_price_without_vat and purchase_vat_rate is not None:
+        purchase_price_with_vat = purchase_price_without_vat * (1 + purchase_vat_rate / Decimal('100'))
+        purchase_price_with_vat = round(purchase_price_with_vat, 2)
+
+    # Marže v procentech (using VAT-inclusive price)
     margin = None
-    if current_price and purchase_price and current_price > 0:
-        margin = (current_price - purchase_price) / current_price * Decimal('100')
+    if current_price and purchase_price_with_vat and current_price > 0:
+        margin = (current_price - purchase_price_with_vat) / current_price * Decimal('100')
         margin = round(margin, 2)
 
-    hero_score = _compute_hero_score(current_price, purchase_price, min_price, competitor_urls)
+    # Get lowest competitor price
+    lowest_competitor_price = None
+    competitor_products = []
+    try:
+        comp_prices = db.query(CompetitorProductPrice).filter(
+            CompetitorProductPrice.product_id == product.id
+        ).all()
+
+        if comp_prices:
+            prices_with_values = [cp for cp in comp_prices if cp.price is not None]
+            if prices_with_values:
+                lowest_competitor_price = min(cp.price for cp in prices_with_values)
+
+            # Build competitor products list for response
+            competitor_products = [
+                {
+                    'id': cp.id,
+                    'product_id': cp.product_id,
+                    'competitor_url': cp.competitor_url,
+                    'price': cp.price,
+                    'currency': cp.currency,
+                    'market': cp.market,
+                    'last_fetched_at': cp.last_fetched_at,
+                    'next_update_at': cp.next_update_at,
+                    'fetch_status': cp.fetch_status,
+                    'fetch_error': cp.fetch_error,
+                    'created_at': cp.created_at,
+                    'updated_at': cp.updated_at,
+                }
+                for cp in comp_prices
+            ]
+    except Exception:
+        pass  # CompetitorProductPrice table may not exist yet
+
+    hero_score = _compute_hero_score(current_price, purchase_price_with_vat, min_price, competitor_urls)
 
     return {
         'id': product.id,
@@ -109,10 +153,14 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
         'current_price': current_price,
         'old_price': price.old_price if price else None,
         'market': price.market if price else 'CZ',
-        'purchase_price': purchase_price,
+        'purchase_price_without_vat': purchase_price_without_vat,
+        'purchase_vat_rate': purchase_vat_rate,
+        'purchase_price_with_vat': purchase_price_with_vat,
         'min_price': min_price,
         'margin': margin,
         'hero_score': hero_score,
+        'lowest_competitor_price': lowest_competitor_price,
+        'competitor_products': competitor_products,
         'created_at': product.created_at,
         'updated_at': product.updated_at,
     }
@@ -194,13 +242,15 @@ def update_product(product_id: UUID, product_update: ProductUpdate, db: Session 
 
 @router.patch("/{product_id}/pricing", response_model=ProductResponse)
 def update_pricing(product_id: UUID, data: PricingUpdate, db: Session = Depends(get_db)):
-    """Nastav nákupní cenu a/nebo minimální cenu produktu."""
+    """Nastav nákupní cenu bez DPH, sazbu DPH a/nebo minimální cenu produktu."""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
-    if data.purchase_price is not None:
-        product.purchase_price = data.purchase_price
+    if data.purchase_price_without_vat is not None:
+        product.purchase_price_without_vat = data.purchase_price_without_vat
+    if data.purchase_vat_rate is not None:
+        product.purchase_vat_rate = data.purchase_vat_rate
     if data.min_price is not None:
         product.min_price = data.min_price
 
