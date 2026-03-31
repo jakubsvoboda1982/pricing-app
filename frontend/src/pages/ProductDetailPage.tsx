@@ -14,6 +14,7 @@ interface Product {
   id: string
   name: string
   sku: string
+  product_code?: string | null
   category?: string
   ean?: string
   thumbnail_url?: string
@@ -274,6 +275,7 @@ export default function ProductDetailPage() {
           <h1 className="text-2xl font-bold text-gray-900">{product.name}</h1>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <span className="text-sm text-gray-500">{product.sku}</span>
+            {product.product_code && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-mono">PRODUCTNO: {product.product_code}</span>}
             {product.category && <span className="text-sm text-gray-500">· {product.category}</span>}
             {product.market && (
               <span className={`text-xs px-2 py-0.5 rounded font-medium ${product.market === 'CZ' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>

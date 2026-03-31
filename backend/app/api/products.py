@@ -143,6 +143,7 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
         'id': product.id,
         'name': product.name,
         'sku': product.sku,
+        'product_code': getattr(product, 'product_code', None),
         'category': product.category,
         'description': product.description,
         'ean': product.ean,
@@ -190,6 +191,7 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
                 extra_data['url_reference'] = cat_product.url_reference or product.url_reference
                 extra_data['category'] = product.category or cat_product.category
                 extra_data['description'] = product.description or cat_product.description
+                extra_data['product_code'] = cat_product.product_code
         except Exception:
             pass
 
@@ -204,6 +206,7 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
         company_id=company.id,
         name=product.name,
         sku=product.sku,
+        product_code=extra_data.get('product_code'),
         category=extra_data.get('category', product.category),
         description=extra_data.get('description', product.description),
         catalog_product_id=product.catalog_product_id,

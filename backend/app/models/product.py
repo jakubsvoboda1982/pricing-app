@@ -14,6 +14,7 @@ class Product(Base):
     company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     sku = Column(String, nullable=False, index=True)
+    product_code = Column(String, nullable=True, index=True)  # PRODUCTNO z XML feedu
     category = Column(String, nullable=True)
     description = Column(Text, nullable=True)
 

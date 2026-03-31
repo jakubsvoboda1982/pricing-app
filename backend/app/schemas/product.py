@@ -65,6 +65,7 @@ class ProductResponse(BaseModel):
     id: UUID
     name: str
     sku: str
+    product_code: Optional[str] = None  # PRODUCTNO z XML feedu
     category: Optional[str] = None
     description: Optional[str] = None
     ean: Optional[str] = None

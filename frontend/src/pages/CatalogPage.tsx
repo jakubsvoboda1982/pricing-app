@@ -17,6 +17,7 @@ interface CompetitorUrlInfo {
 interface CatalogProduct {
   id: string
   name: string
+  product_code?: string | null
   ean?: string
   category?: string
   manufacturer?: string
@@ -373,6 +374,9 @@ export default function CatalogPage() {
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        {product.product_code && (
+                          <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-mono">#{product.product_code}</span>
+                        )}
                         {product.ean && (
                           <span className="text-xs text-gray-400">{product.ean}</span>
                         )}
