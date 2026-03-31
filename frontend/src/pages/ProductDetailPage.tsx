@@ -125,6 +125,7 @@ export default function ProductDetailPage() {
   const [priceForm, setPriceForm] = useState({ current_price: '', old_price: '', market: 'CZ' })
   const [showPricingForm, setShowPricingForm] = useState(false)
   const [pricingForm, setPricingForm] = useState({ purchase_price_without_vat: '', purchase_vat_rate: '', manufacturing_cost: '', min_price: '' })
+  const [costType, setCostType] = useState<'manufacturing' | 'purchase'>('purchase')
   const [showAddUrl, setShowAddUrl] = useState(false)
   const [newUrl, setNewUrl] = useState('')
   const [newUrlMarket, setNewUrlMarket] = useState<'CZ' | 'SK'>('CZ')
@@ -218,16 +219,21 @@ export default function ProductDetailPage() {
   }
 
   const handleSetPricing = () => {
-    const ppwv = pricingForm.purchase_price_without_vat ? parseFloat(pricingForm.purchase_price_without_vat.replace(',', '.')) : undefined
-    const pvr = pricingForm.purchase_vat_rate ? parseFloat(pricingForm.purchase_vat_rate.replace(',', '.')) : undefined
-    const mc = pricingForm.manufacturing_cost ? parseFloat(pricingForm.manufacturing_cost.replace(',', '.')) : undefined
-    const mp = pricingForm.min_price ? parseFloat(pricingForm.min_price.replace(',', '.')) : undefined
-    if (!ppwv && !pvr && !mc && !mp) return
+    const pvr = pricingForm.purchase_vat_rate ? parseFloat(pricingForm.purchase_vat_rate.replace(',', '.')) : purchaseVatRate
+    const baseCost = costType === 'manufacturing'
+      ? (pricingForm.manufacturing_cost ? parseFloat(pricingForm.manufacturing_cost.replace(',', '.')) : undefined)
+      : (pricingForm.purchase_price_without_vat ? parseFloat(pricingForm.purchase_price_without_vat.replace(',', '.')) : undefined)
+
+    if (!baseCost) return
+
+    // Auto-calculate min_price with VAT: baseCost * (1 + VAT/100)
+    const minPriceWithVat = baseCost * (1 + pvr / 100)
+
     setPricingMutation.mutate({
-      ...(ppwv !== undefined && { purchase_price_without_vat: ppwv }),
+      ...(costType === 'manufacturing' && baseCost !== undefined && { manufacturing_cost: baseCost }),
+      ...(costType === 'purchase' && baseCost !== undefined && { purchase_price_without_vat: baseCost }),
       ...(pvr !== undefined && { purchase_vat_rate: pvr }),
-      ...(mc !== undefined && { manufacturing_cost: mc }),
-      ...(mp !== undefined && { min_price: mp }),
+      min_price: minPriceWithVat,
     })
   }
 
@@ -236,9 +242,11 @@ export default function ProductDetailPage() {
   }
 
   const currentPrice = product.current_price != null ? Number(product.current_price) : null
+  const manufacturingCost = product.manufacturing_cost != null ? Number(product.manufacturing_cost) : null
   const purchasePriceWithoutVat = product.purchase_price_without_vat != null ? Number(product.purchase_price_without_vat) : null
   const purchaseVatRate = product.purchase_vat_rate != null ? Number(product.purchase_vat_rate) : 12
-  const purchasePriceWithVat = product.purchase_price_with_vat != null ? Number(product.purchase_price_with_vat) : null
+  const baseCostWithoutVat = manufacturingCost ?? purchasePriceWithoutVat // Use manufacturing cost if available, else purchase cost
+  const purchasePriceWithVat = baseCostWithoutVat != null ? baseCostWithoutVat * (1 + purchaseVatRate / 100) : null
   const minPrice = product.min_price != null ? Number(product.min_price) : null
   const lowestCompetitorPrice = product.lowest_competitor_price != null ? Number(product.lowest_competitor_price) : null
   const margin = product.margin != null ? Number(product.margin) : null
@@ -379,15 +387,15 @@ export default function ProductDetailPage() {
 
           {/* Pricing details */}
           <div className="space-y-0">
-            {/* Purchase price + min price row */}
+            {/* Base cost (manufacturing or purchase) */}
             <div className="flex items-center justify-between py-2 border-b border-gray-50 group">
               <span className="text-sm text-gray-500 flex items-center gap-1.5">
-                <ShoppingCart size={13} className="text-gray-400" /> Nákupní cena (bez DPH)
+                <ShoppingCart size={13} className="text-gray-400" /> {manufacturingCost != null ? 'Výrobní' : 'Nákupní'} cena (bez DPH)
               </span>
               <div className="flex items-center gap-2">
-                {purchasePriceWithoutVat != null ? (
+                {baseCostWithoutVat != null ? (
                   <div className="text-right">
-                    <span className="text-sm font-medium text-gray-800">{fmt(purchasePriceWithoutVat)} CZK</span>
+                    <span className="text-sm font-medium text-gray-800">{fmt(baseCostWithoutVat)} CZK</span>
                     <p className="text-xs text-gray-400">DPH: {fmt(purchaseVatRate, 0)}% → {fmt(purchasePriceWithVat)} CZK s DPH</p>
                   </div>
                 ) : (
@@ -401,7 +409,7 @@ export default function ProductDetailPage() {
             </div>
 
             <div className="flex items-center justify-between py-2 border-b border-gray-50">
-              <span className="text-sm text-gray-500">Minimální cena</span>
+              <span className="text-sm text-gray-500">Minimální cena s DPH</span>
               {minPrice != null ? (
                 <span className="text-sm font-medium text-gray-800">{fmt(minPrice)} CZK</span>
               ) : (
@@ -433,35 +441,63 @@ export default function ProductDetailPage() {
           {/* Pricing edit form (purchase price + min price) */}
           {showPricingForm && (
             <div className="p-3 bg-gray-50 rounded-lg space-y-3 border border-gray-200">
-              <p className="text-xs font-medium text-gray-700">Cenotvorba: nákupní cena, DPH, výrobní cena a minimální cena</p>
-              <div className="grid grid-cols-4 gap-2">
+              <p className="text-xs font-medium text-gray-700">Cenotvorba: vyberte typ produktu a zadejte cenu bez DPH</p>
+
+              {/* Cost type selector */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCostType('purchase')}
+                  className={`px-3 py-1.5 rounded text-xs font-medium transition ${costType === 'purchase' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-700'}`}>
+                  Nákupovaný (nákupní cena)
+                </button>
+                <button
+                  onClick={() => setCostType('manufacturing')}
+                  className={`px-3 py-1.5 rounded text-xs font-medium transition ${costType === 'manufacturing' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-700'}`}>
+                  Vlastní výroba (výrobní cena)
+                </button>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                {/* Cost field (either purchase or manufacturing) */}
                 <div>
-                  <label className="text-xs text-gray-600">Nákupní cena bez DPH *</label>
-                  <input type="text" value={pricingForm.purchase_price_without_vat}
-                    onChange={(e) => setPricingForm(p => ({ ...p, purchase_price_without_vat: e.target.value }))}
-                    placeholder={purchasePriceWithoutVat != null ? fmt(purchasePriceWithoutVat) : '200.00'}
+                  <label className="text-xs text-gray-600">{costType === 'manufacturing' ? 'Výrobní cena bez DPH *' : 'Nákupní cena bez DPH *'}</label>
+                  <input
+                    type="text"
+                    value={costType === 'manufacturing' ? pricingForm.manufacturing_cost : pricingForm.purchase_price_without_vat}
+                    onChange={(e) => {
+                      if (costType === 'manufacturing') {
+                        setPricingForm(p => ({ ...p, manufacturing_cost: e.target.value }))
+                      } else {
+                        setPricingForm(p => ({ ...p, purchase_price_without_vat: e.target.value }))
+                      }
+                    }}
+                    placeholder={costType === 'manufacturing' ? '150.00' : '200.00'}
                     className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
+
+                {/* VAT rate */}
                 <div>
                   <label className="text-xs text-gray-600">Sazba DPH (%)</label>
-                  <input type="text" value={pricingForm.purchase_vat_rate}
+                  <input
+                    type="text"
+                    value={pricingForm.purchase_vat_rate}
                     onChange={(e) => setPricingForm(p => ({ ...p, purchase_vat_rate: e.target.value }))}
                     placeholder={fmt(purchaseVatRate, 0)}
                     className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
+
+                {/* Auto-calculated minimum price with VAT */}
                 <div>
-                  <label className="text-xs text-gray-600">Výrobní cena</label>
-                  <input type="text" value={pricingForm.manufacturing_cost}
-                    onChange={(e) => setPricingForm(p => ({ ...p, manufacturing_cost: e.target.value }))}
-                    placeholder="150.00"
-                    className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-600">Minimální cena</label>
-                  <input type="text" value={pricingForm.min_price}
-                    onChange={(e) => setPricingForm(p => ({ ...p, min_price: e.target.value }))}
-                    placeholder={minPrice != null ? fmt(minPrice) : '250.00'}
-                    className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <label className="text-xs text-gray-600">Minimální cena s DPH (auto)</label>
+                  <div className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm bg-white text-gray-900 font-medium flex items-center">
+                    {(() => {
+                      const baseCost = costType === 'manufacturing'
+                        ? (pricingForm.manufacturing_cost ? parseFloat(pricingForm.manufacturing_cost.replace(',', '.')) : null)
+                        : (pricingForm.purchase_price_without_vat ? parseFloat(pricingForm.purchase_price_without_vat.replace(',', '.')) : null)
+                      const vat = pricingForm.purchase_vat_rate ? parseFloat(pricingForm.purchase_vat_rate.replace(',', '.')) : purchaseVatRate
+                      return baseCost != null ? fmt(baseCost * (1 + vat / 100)) : '—'
+                    })()}
+                  </div>
                 </div>
               </div>
               <p className="text-xs text-gray-500">* CZ potraviny obvykle 12%, ostatní položky 21%</p>
