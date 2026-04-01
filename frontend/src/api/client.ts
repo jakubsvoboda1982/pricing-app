@@ -463,6 +463,14 @@ export class APIClient {
     return this.request('POST', `/matching/matches/${matchId}/deactivate`)
   }
 
+  async deleteMatch(matchId: string) {
+    return this.request('DELETE', `/matching/matches/${matchId}`)
+  }
+
+  async updateCandidateUrl(candidateId: string, url: string) {
+    return this.request('PATCH', `/matching/candidates/${candidateId}/url`, { url })
+  }
+
   async getMatchStats(params?: { product_id?: string; competitor_id?: string }) {
     const p = new URLSearchParams()
     if (params?.product_id) p.set('product_id', params.product_id)

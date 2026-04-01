@@ -354,6 +354,51 @@ def deactivate_match(
     return {"message": "Match deaktivován", "match_id": match_id}
 
 
+@router.delete("/matches/{match_id}")
+def delete_match(
+    match_id: str,
+    db: Session = Depends(get_db),
+    _token=Depends(verify_token),
+):
+    """Trvale smaže match záznam (hard delete)."""
+    match = db.query(ProductMatch).filter_by(id=match_id).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Match nenalezen")
+    db.delete(match)
+    db.commit()
+    return {"message": "Match smazán", "match_id": match_id}
+
+
+class UpdateCandidateUrlRequest(BaseModel):
+    url: str
+
+
+@router.patch("/candidates/{candidate_id}/url")
+def update_candidate_url(
+    candidate_id: str,
+    body: UpdateCandidateUrlRequest,
+    db: Session = Depends(get_db),
+    _token=Depends(verify_token),
+):
+    """
+    Opraví URL kandidáta a vymaže zastaralá scraped data (příští pipeline
+    data znovu stáhne z nové adresy).
+    """
+    candidate = db.query(CompetitorCandidate).filter_by(id=candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Kandidát nenalezen")
+
+    candidate.discovered_url = body.url.strip()
+    # Vymaž zastaralá data — příští scrape je načte z nové URL
+    candidate.product_name_raw = None
+    candidate.product_name_normalized = None
+    candidate.price_value = None
+    candidate.scraped_at = None
+    candidate.content_hash = None
+    db.commit()
+    return {"message": "URL kandidáta aktualizováno", "candidate_id": candidate_id, "url": body.url}
+
+
 # ── Endpointy: Pipeline ────────────────────────────────────────────────────────
 
 @router.post("/run-discovery")

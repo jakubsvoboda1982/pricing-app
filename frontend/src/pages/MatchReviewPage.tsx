@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   CheckCircle, XCircle, ExternalLink, ChevronDown, ChevronUp,
   RefreshCw, AlertCircle, Search, Filter, Package, Zap, BarChart2,
-  ShoppingCart, Scale,
+  ShoppingCart, Scale, Trash2, Pencil, X,
 } from 'lucide-react'
 import { apiClient } from '@/api/client'
 
@@ -223,6 +223,10 @@ function MatchCard({ match, onReload }: { match: Match; onReload: () => void }) 
   const [expanded, setExpanded] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
   const [approving, setApproving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [editUrlOpen, setEditUrlOpen] = useState(false)
+  const [editUrl, setEditUrl] = useState(match.candidate_url ?? '')
+  const [savingUrl, setSavingUrl] = useState(false)
 
   const bd = match.scoring_breakdown
   const isPending = match.match_status === 'proposed' || match.match_status === 'auto_approved'
@@ -241,6 +245,29 @@ function MatchCard({ match, onReload }: { match: Match; onReload: () => void }) 
   const handleRejectDone = () => {
     setRejectOpen(false)
     onReload()
+  }
+
+  const handleDelete = async () => {
+    if (!confirm('Trvale smazat tuto shodu?')) return
+    setDeleting(true)
+    try {
+      await apiClient.deleteMatch(match.id)
+      onReload()
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const handleSaveUrl = async () => {
+    if (!match.candidate_id || !editUrl.trim()) return
+    setSavingUrl(true)
+    try {
+      await apiClient.updateCandidateUrl(match.candidate_id, editUrl.trim())
+      setEditUrlOpen(false)
+      onReload()
+    } finally {
+      setSavingUrl(false)
+    }
   }
 
   const availabilityChip = match.candidate_available === true
@@ -344,9 +371,64 @@ function MatchCard({ match, onReload }: { match: Match; onReload: () => void }) 
         </div>
 
         {/* Expanded scoring breakdown */}
-        {expanded && bd && (
+        {expanded && (
           <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 space-y-3">
-            <div className="flex items-start gap-4">
+
+            {/* URL editor + delete */}
+            <div className="flex items-center gap-2 pb-2 border-b border-gray-200">
+              <span className="text-xs text-gray-500 font-medium shrink-0">URL kandidáta:</span>
+              {editUrlOpen ? (
+                <>
+                  <input
+                    type="url"
+                    value={editUrl}
+                    onChange={e => setEditUrl(e.target.value)}
+                    className="flex-1 text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="https://..."
+                  />
+                  <button
+                    onClick={handleSaveUrl}
+                    disabled={savingUrl || !editUrl.trim()}
+                    className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs rounded transition">
+                    {savingUrl ? <RefreshCw size={11} className="animate-spin" /> : null}
+                    Uložit
+                  </button>
+                  <button onClick={() => { setEditUrlOpen(false); setEditUrl(match.candidate_url ?? '') }}
+                    className="p-1 text-gray-400 hover:text-gray-600 rounded transition">
+                    <X size={13} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  {match.candidate_url ? (
+                    <a href={match.candidate_url} target="_blank" rel="noopener noreferrer"
+                      className="text-xs text-blue-500 hover:underline truncate flex-1 min-w-0">
+                      {match.candidate_url}
+                    </a>
+                  ) : (
+                    <span className="text-xs text-gray-400 flex-1">—</span>
+                  )}
+                  {match.candidate_id && (
+                    <button
+                      onClick={() => { setEditUrlOpen(true); setEditUrl(match.candidate_url ?? '') }}
+                      className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-blue-700 hover:bg-blue-50 border border-gray-200 rounded transition"
+                      title="Opravit URL produktu u konkurenta">
+                      <Pencil size={11} /> Upravit URL
+                    </button>
+                  )}
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 border border-red-200 rounded transition disabled:opacity-50"
+                    title="Trvale smazat tuto shodu">
+                    {deleting ? <RefreshCw size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                    Smazat
+                  </button>
+                </>
+              )}
+            </div>
+
+            {bd && <div className="flex items-start gap-4">
               {/* Score bars */}
               <div className="flex-1 space-y-1.5">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Scoring breakdown</p>
@@ -390,7 +472,7 @@ function MatchCard({ match, onReload }: { match: Match; onReload: () => void }) 
                   </div>
                 )}
               </div>
-            </div>
+            </div>}
           </div>
         )}
       </div>
