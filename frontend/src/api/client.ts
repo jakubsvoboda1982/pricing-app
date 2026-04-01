@@ -229,7 +229,7 @@ export class APIClient {
     return this.request('GET', `/competitors/alerts${qs ? `?${qs}` : ''}`)
   }
 
-  async dismissAlert(alertId: string) {
+  async dismissCompetitorAlert(alertId: string) {
     return this.request('PUT', `/competitors/alerts/${alertId}/dismiss`)
   }
 
@@ -388,6 +388,27 @@ export class APIClient {
 
   async toggleStockAlert(watchedId: string) {
     return this.request('POST', `/watchlist/${watchedId}/toggle-stock-alert`)
+  }
+
+  // Alerts
+  async listAlerts(status?: string, severity?: string) {
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (severity) params.set('severity', severity)
+    const qs = params.toString()
+    return this.request('GET', `/alerts${qs ? `?${qs}` : ''}`)
+  }
+
+  async markAlertRead(alertId: string) {
+    return this.request('POST', `/alerts/${alertId}/read`)
+  }
+
+  async dismissAlert(alertId: string) {
+    return this.request('POST', `/alerts/${alertId}/dismiss`)
+  }
+
+  async getAlertsStats() {
+    return this.request('GET', '/alerts/stats')
   }
 }
 
