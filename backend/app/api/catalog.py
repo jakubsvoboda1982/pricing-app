@@ -263,8 +263,11 @@ def get_catalog_products(
     manufacturer: str = None,
     market: str = Query(None, description="CZ, SK, nebo null pro všechny"),
     search: str = None,
+    in_stock: bool = Query(None, description="True = pouze skladem"),
+    min_price: float = Query(None, description="Minimální cena s DPH"),
+    max_price: float = Query(None, description="Maximální cena s DPH"),
     skip: int = 0,
-    limit: int = 200
+    limit: int = 2000,
 ):
     """Získej produkty z katalogu s filtrem a obohacenými daty"""
     query = db.query(CatalogProduct)
@@ -286,7 +289,21 @@ def get_catalog_products(
             CatalogProduct.manufacturer.ilike(f"%{search}%")
         )
 
-    products = query.offset(skip).limit(limit).all()
+    if in_stock is True:
+        query = query.filter(CatalogProduct.quantity_in_stock > 0)
+
+    # Price filter: compare against price_without_vat * (1 + vat_rate/100)
+    # Use price_without_vat as a proxy since price_vat is computed
+    if min_price is not None:
+        query = query.filter(
+            CatalogProduct.price_without_vat * (1 + CatalogProduct.vat_rate / 100) >= min_price
+        )
+    if max_price is not None:
+        query = query.filter(
+            CatalogProduct.price_without_vat * (1 + CatalogProduct.vat_rate / 100) <= max_price
+        )
+
+    products = query.order_by(CatalogProduct.name).offset(skip).limit(limit).all()
     return [CatalogProductResponse(**_enrich_catalog_product(p, db)) for p in products]
 
 

@@ -3,10 +3,37 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Search, Plus, CheckCircle, Package, ExternalLink, ChevronDown,
-  ArrowUpDown, ArrowUp, ArrowDown, X, Eye
+  ArrowUpDown, ArrowUp, ArrowDown, X, Eye, SlidersHorizontal, Weight
 } from 'lucide-react'
 import { apiClient, API_BASE_URL } from '@/api/client'
 import { useMarketStore } from '@/store/market'
+
+// Parse weight (in grams) from product name, e.g. "Ananas 500 g" → 500, "Kešu 1 kg" → 1000
+function parseWeightG(name: string): number | null {
+  const kgMatch = name.match(/(\d+[.,]?\d*)\s*kg/i)
+  if (kgMatch) return Math.round(parseFloat(kgMatch[1].replace(',', '.')) * 1000)
+  const gMatch = name.match(/(\d+[.,]?\d*)\s*g(?!\w)/i)
+  if (gMatch) return Math.round(parseFloat(gMatch[1].replace(',', '.')))
+  return null
+}
+
+const WEIGHT_RANGES = [
+  { label: 'Vše', min: null, max: null },
+  { label: '< 100 g',    min: 0,    max: 99   },
+  { label: '100–250 g',  min: 100,  max: 250  },
+  { label: '251–500 g',  min: 251,  max: 500  },
+  { label: '501 g–1 kg', min: 501,  max: 1000 },
+  { label: '> 1 kg',     min: 1001, max: null },
+]
+
+const PRICE_RANGES = [
+  { label: 'Vše',         min: null, max: null },
+  { label: '< 50 Kč',    min: null, max: 50   },
+  { label: '50–150 Kč',  min: 50,   max: 150  },
+  { label: '150–300 Kč', min: 150,  max: 300  },
+  { label: '300–500 Kč', min: 300,  max: 500  },
+  { label: '> 500 Kč',   min: 500,  max: null },
+]
 
 interface CompetitorUrlInfo {
   url: string
@@ -55,11 +82,15 @@ export default function CatalogPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [selectedManufacturer, setSelectedManufacturer] = useState<string | null>(null)
+  const [weightRangeIdx, setWeightRangeIdx] = useState(0)
+  const [priceRangeIdx, setPriceRangeIdx] = useState(0)
+  const [stockFilter, setStockFilter] = useState<'all' | 'in_stock'>('all')
   const [sortField, setSortField] = useState<SortField>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [addedProducts, setAddedProducts] = useState<Set<string>>(new Set())
   const [addingId, setAddingId] = useState<string | null>(null)
   const [manufacturerOpen, setManufacturerOpen] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
 
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -89,15 +120,21 @@ export default function CatalogPage() {
     },
   })
 
-  // Products
+  const priceRange = PRICE_RANGES[priceRangeIdx]
+
+  // Products — fetch all matching server-side filters; weight is client-side
   const { data: products = [], isLoading } = useQuery<CatalogProduct[]>({
-    queryKey: ['catalogProducts', selectedCategory, selectedManufacturer, searchTerm, selectedMarket],
+    queryKey: ['catalogProducts', selectedCategory, selectedManufacturer, searchTerm, selectedMarket, stockFilter, priceRangeIdx],
     queryFn: async () => {
       const params = new URLSearchParams()
       if (selectedCategory) params.append('category', selectedCategory)
       if (selectedManufacturer) params.append('manufacturer', selectedManufacturer)
       if (searchTerm) params.append('search', searchTerm)
       if (selectedMarket && selectedMarket !== 'ALL') params.append('market', selectedMarket)
+      if (stockFilter === 'in_stock') params.append('in_stock', 'true')
+      if (priceRange.min != null) params.append('min_price', String(priceRange.min))
+      if (priceRange.max != null) params.append('max_price', String(priceRange.max))
+      params.append('limit', '2000')
       const qs = params.toString()
       const r = await fetch(`${API_BASE_URL}/catalog/products${qs ? `?${qs}` : ''}`)
       if (!r.ok) return []
@@ -105,9 +142,22 @@ export default function CatalogPage() {
     },
   })
 
+  // Weight filter (client-side — weight is parsed from name)
+  const weightRange = WEIGHT_RANGES[weightRangeIdx]
+  const weightFiltered = useMemo(() => {
+    if (weightRange.min == null && weightRange.max == null) return products
+    return products.filter(p => {
+      const w = parseWeightG(p.name)
+      if (w == null) return false
+      if (weightRange.min != null && w < weightRange.min) return false
+      if (weightRange.max != null && w > weightRange.max) return false
+      return true
+    })
+  }, [products, weightRange])
+
   // Sort
   const sorted = useMemo(() => {
-    return [...products].sort((a, b) => {
+    return [...weightFiltered].sort((a, b) => {
       let av: any, bv: any
       if (sortField === 'name') { av = a.name; bv = b.name }
       else if (sortField === 'price_vat') { av = a.price_vat ?? -1; bv = b.price_vat ?? -1 }
@@ -156,7 +206,21 @@ export default function CatalogPage() {
     }
   }
 
-  const activeFiltersCount = [selectedCategory, selectedManufacturer].filter(Boolean).length
+  const activeFiltersCount = [
+    selectedCategory,
+    selectedManufacturer,
+    weightRangeIdx > 0 ? 'weight' : null,
+    priceRangeIdx > 0 ? 'price' : null,
+    stockFilter !== 'all' ? 'stock' : null,
+  ].filter(Boolean).length
+
+  const clearAllFilters = () => {
+    setSelectedCategory(null)
+    setSelectedManufacturer(null)
+    setWeightRangeIdx(0)
+    setPriceRangeIdx(0)
+    setStockFilter('all')
+  }
 
   return (
     <div className="space-y-5">
@@ -165,7 +229,7 @@ export default function CatalogPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Katalog produktů</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {isLoading ? 'Načítám...' : `${sorted.length} produktů · Vyber které chceš sledovat`}
+            {isLoading ? 'Načítám...' : `${sorted.length}${sorted.length !== products.length ? ` z ${products.length}` : ''} produktů · Vyber které chceš sledovat`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -187,10 +251,11 @@ export default function CatalogPage() {
 
       {/* Filters bar */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-        {/* Row 1: Search + Manufacturer */}
-        <div className="flex gap-3">
-          <div className="relative flex-1 max-w-md">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        {/* Row 1: Search + dropdowns + filters toggle */}
+        <div className="flex gap-2 flex-wrap">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               value={searchTerm}
@@ -199,11 +264,8 @@ export default function CatalogPage() {
               className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X size={14} />
+              <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <X size={13} />
               </button>
             )}
           </div>
@@ -211,31 +273,22 @@ export default function CatalogPage() {
           {/* Manufacturer dropdown */}
           {manufacturers.length > 0 && (
             <div className="relative">
-              <button
-                onClick={() => setManufacturerOpen(o => !o)}
-                className={`flex items-center gap-2 px-3 py-2 border rounded-lg text-sm transition ${
-                  selectedManufacturer
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-200 text-gray-700 hover:bg-gray-50'
-                }`}
-              >
+              <button onClick={() => setManufacturerOpen(o => !o)}
+                className={`flex items-center gap-1.5 px-3 py-2 border rounded-lg text-sm transition ${
+                  selectedManufacturer ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+                }`}>
                 <span>{selectedManufacturer || 'Výrobce'}</span>
-                <ChevronDown size={14} className={manufacturerOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                <ChevronDown size={13} className={manufacturerOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
               </button>
               {manufacturerOpen && (
                 <div className="absolute top-full left-0 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-60 overflow-y-auto">
-                  <button
-                    onClick={() => { setSelectedManufacturer(null); setManufacturerOpen(false) }}
-                    className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${!selectedManufacturer ? 'text-blue-600 font-medium' : 'text-gray-700'}`}
-                  >
+                  <button onClick={() => { setSelectedManufacturer(null); setManufacturerOpen(false) }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${!selectedManufacturer ? 'text-blue-600 font-medium' : 'text-gray-700'}`}>
                     Všichni výrobci
                   </button>
                   {manufacturers.map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => { setSelectedManufacturer(m); setManufacturerOpen(false) }}
-                      className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${selectedManufacturer === m ? 'text-blue-600 font-medium' : 'text-gray-700'}`}
-                    >
+                    <button key={m} onClick={() => { setSelectedManufacturer(m); setManufacturerOpen(false) }}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${selectedManufacturer === m ? 'text-blue-600 font-medium' : 'text-gray-700'}`}>
                       {m}
                     </button>
                   ))}
@@ -244,42 +297,95 @@ export default function CatalogPage() {
             </div>
           )}
 
-          {/* Clear filters */}
+          {/* More filters toggle */}
+          <button onClick={() => setFiltersOpen(o => !o)}
+            className={`flex items-center gap-1.5 px-3 py-2 border rounded-lg text-sm transition ${
+              filtersOpen || activeFiltersCount > 0 ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+            }`}>
+            <SlidersHorizontal size={14} />
+            Filtry
+            {activeFiltersCount > 0 && (
+              <span className="bg-blue-600 text-white text-xs w-4 h-4 rounded-full flex items-center justify-center font-bold">
+                {activeFiltersCount}
+              </span>
+            )}
+          </button>
+
+          {/* Clear all */}
           {activeFiltersCount > 0 && (
-            <button
-              onClick={() => { setSelectedCategory(null); setSelectedManufacturer(null) }}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 hover:bg-red-50 border border-red-200 rounded-lg transition"
-            >
-              <X size={13} />
-              Zrušit filtry ({activeFiltersCount})
+            <button onClick={clearAllFilters}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 hover:bg-red-50 border border-red-200 rounded-lg transition">
+              <X size={13} /> Zrušit vše
             </button>
           )}
         </div>
 
+        {/* Expanded filters panel */}
+        {filtersOpen && (
+          <div className="border-t border-gray-100 pt-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Weight */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
+                <Weight size={12} /> Hmotnost
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {WEIGHT_RANGES.map((r, i) => (
+                  <button key={r.label} onClick={() => setWeightRangeIdx(i)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${
+                      weightRangeIdx === i ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}>
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Price */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Cena s DPH</p>
+              <div className="flex flex-wrap gap-1.5">
+                {PRICE_RANGES.map((r, i) => (
+                  <button key={r.label} onClick={() => setPriceRangeIdx(i)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${
+                      priceRangeIdx === i ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}>
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Stock */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Dostupnost</p>
+              <div className="flex gap-1.5">
+                {([['all', 'Vše'], ['in_stock', 'Skladem']] as const).map(([val, label]) => (
+                  <button key={val} onClick={() => setStockFilter(val)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition ${
+                      stockFilter === val ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Row 2: Category chips */}
         {categories.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              onClick={() => setSelectedCategory(null)}
+          <div className="flex flex-wrap gap-1.5 border-t border-gray-100 pt-3">
+            <button onClick={() => setSelectedCategory(null)}
               className={`px-3 py-1 rounded-full text-xs font-medium transition ${
-                selectedCategory === null
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
+                selectedCategory === null ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}>
               Vše
             </button>
             {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
-                title={cat}
+              <button key={cat} onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)} title={cat}
                 className={`px-3 py-1 rounded-full text-xs font-medium transition max-w-[200px] truncate ${
-                  selectedCategory === cat
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
+                  selectedCategory === cat ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}>
                 {cat.split('|').pop()?.trim() || cat}
               </button>
             ))}
