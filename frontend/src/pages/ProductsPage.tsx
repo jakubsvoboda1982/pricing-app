@@ -179,11 +179,17 @@ export default function ProductsPage() {
               const isConfirmDelete = confirmDeleteId === product.id
               const cp = product.current_price != null ? Number(product.current_price) : null
               const score = product.hero_score ?? 0
+              const lowestComp = product.lowest_competitor_price != null ? Number(product.lowest_competitor_price) : null
+              const isPriceAlert = cp != null && lowestComp != null && lowestComp < cp
 
               return (
                 <div key={product.id}>
                   <div
-                    className={`flex items-center px-4 py-3.5 transition cursor-pointer ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                    className={`flex items-center px-4 py-3.5 transition cursor-pointer border-l-2 ${
+                      isSelected ? 'bg-blue-50 border-l-blue-400'
+                      : isPriceAlert ? 'bg-red-50 border-l-red-400 hover:bg-red-100'
+                      : 'border-l-transparent hover:bg-gray-50'
+                    }`}
                     onClick={e => {
                       if ((e.target as HTMLElement).closest('input,button,a')) return
                       navigate(`/products/${product.id}`)
@@ -259,10 +265,16 @@ export default function ProductsPage() {
 
                     {/* Competitors */}
                     <div className="w-36 flex-shrink-0 text-right">
-                      {product.lowest_competitor_price != null ? (
+                      {lowestComp != null ? (
                         <div>
-                          <span className="text-sm font-semibold text-gray-700">{Number(product.lowest_competitor_price).toLocaleString('cs-CZ')} CZK</span>
-                          <p className="text-xs text-gray-400">{product.competitor_urls?.length ?? 0} URL</p>
+                          <span className={`text-sm font-semibold ${isPriceAlert ? 'text-red-600' : 'text-gray-700'}`}>
+                            {lowestComp.toLocaleString('cs-CZ')} CZK
+                          </span>
+                          {isPriceAlert && cp != null ? (
+                            <p className="text-xs text-red-500 font-medium">▲ +{(cp - lowestComp).toLocaleString('cs-CZ')} CZK</p>
+                          ) : (
+                            <p className="text-xs text-gray-400">{product.competitor_urls?.length ?? 0} URL</p>
+                          )}
                         </div>
                       ) : product.competitor_urls && product.competitor_urls.length > 0 ? (
                         <span className="text-xs text-gray-400">{product.competitor_urls.length} URL</span>
