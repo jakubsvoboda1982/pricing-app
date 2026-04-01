@@ -1,6 +1,6 @@
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle } from 'lucide-react'
+import { TrendingUp, AlertTriangle, CheckCircle, Star, BarChart2, Shield } from 'lucide-react'
 import { apiClient } from '@/api/client'
 
 export default function HeroPage() {
@@ -20,173 +20,167 @@ export default function HeroPage() {
 
   if (!product || !analytics) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <p className="text-gray-500">Načítám data...</p>
+      <div className="bg-white rounded-xl border border-gray-200 p-10 text-center text-sm text-gray-400">
+        Načítám data...
       </div>
     )
   }
 
-  const scoreColor = analytics.hero_score >= 75 ? 'green' : analytics.hero_score >= 50 ? 'yellow' : 'red'
-  const riskColor = analytics.margin_risk === 'Low' ? 'green' : analytics.margin_risk === 'Medium' ? 'yellow' : 'red'
+  const score = analytics.hero_score ?? 0
+  const scoreColor = score >= 75 ? 'text-green-600' : score >= 50 ? 'text-yellow-600' : 'text-red-600'
+  const scoreBg   = score >= 75 ? 'bg-green-50'   : score >= 50 ? 'bg-yellow-50'   : 'bg-red-50'
+  const riskColor = analytics.margin_risk === 'Low' ? 'text-green-700' : analytics.margin_risk === 'Medium' ? 'text-yellow-700' : 'text-red-700'
+  const riskBg    = analytics.margin_risk === 'Low' ? 'bg-green-50'    : analytics.margin_risk === 'Medium' ? 'bg-yellow-50'    : 'bg-red-50'
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-5">
+
+      {/* ── HEADER ─────────────────────────────────────────────────────── */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">{product.name}</h1>
-        <p className="text-gray-600 mt-1">SKU: {product.sku}</p>
+        <h1 className="text-2xl font-bold text-gray-900">{product.name}</h1>
+        <p className="text-sm text-gray-400 mt-0.5">SKU: {product.sku} · Hero analýza produktu</p>
       </div>
 
-      {/* Hero Score */}
-      <div className="bg-white rounded-lg shadow p-8">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-semibold text-gray-900">Hero Score</h2>
-          <span className={`text-6xl font-bold ${scoreColor === 'green' ? 'text-green-600' : scoreColor === 'yellow' ? 'text-yellow-600' : 'text-red-600'}`}>
-            {analytics.hero_score}
-          </span>
+      {/* ── KPI STRIP ──────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className={`border border-gray-200 rounded-xl p-4 ${scoreBg}`}>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Hero skóre</p>
+            <Star size={14} className={scoreColor} />
+          </div>
+          <p className={`text-2xl font-bold ${scoreColor}`}>{score}</p>
+          <p className="text-xs text-gray-400 mt-0.5">z 100 bodů</p>
         </div>
-
-        <div className="grid grid-cols-3 gap-4">
-          <div className="p-4 bg-blue-50 rounded-lg">
-            <p className="text-gray-600 text-sm">Bestseller status</p>
-            <p className="text-xl font-semibold text-gray-900 mt-2">Active</p>
-            <p className="text-xs text-gray-500 mt-1">42% repeat purchase</p>
+        <div className={`border border-gray-200 rounded-xl p-4 ${riskBg}`}>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Marže risk</p>
+            <Shield size={14} className={riskColor} />
           </div>
-
-          <div className="p-4 bg-indigo-50 rounded-lg">
-            <p className="text-gray-600 text-sm">Broad appeal</p>
-            <p className="text-xl font-semibold text-gray-900 mt-2">Strong</p>
-            <p className="text-xs text-gray-500 mt-1">Good appeal in ads</p>
+          <p className={`text-2xl font-bold ${riskColor}`}>{analytics.margin_risk ?? '—'}</p>
+          <p className="text-xs text-gray-400 mt-0.5">úroveň rizika</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Pozice</p>
+            <TrendingUp size={14} className="text-blue-400" />
           </div>
+          <p className="text-2xl font-bold text-blue-700">Premium</p>
+          <p className="text-xs text-gray-400 mt-0.5">tržní pozice</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Repeat</p>
+            <BarChart2 size={14} className="text-purple-400" />
+          </div>
+          <p className="text-2xl font-bold text-purple-700">42 %</p>
+          <p className="text-xs text-gray-400 mt-0.5">opakované nákupy</p>
+        </div>
+      </div>
 
-          <div className="p-4 bg-purple-50 rounded-lg">
-            <p className="text-gray-600 text-sm">Everyday hero</p>
-            <p className="text-xl font-semibold text-gray-900 mt-2">The product that brings customers back</p>
-            <p className="text-xs text-gray-500 mt-1">Primary acquisition product for CZ market</p>
+      {/* ── HERO SCORE BREAKDOWN ───────────────────────────────────────── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <h2 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wide">Složky Hero skóre</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+            <p className="text-xs font-medium text-blue-600 mb-1">Bestseller status</p>
+            <p className="text-base font-bold text-blue-900">Aktivní</p>
+            <p className="text-xs text-blue-500 mt-1">42% opakovaných nákupů</p>
+          </div>
+          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+            <p className="text-xs font-medium text-indigo-600 mb-1">Broad appeal</p>
+            <p className="text-base font-bold text-indigo-900">Silný</p>
+            <p className="text-xs text-indigo-500 mt-1">Vysoký zájem v reklamách</p>
+          </div>
+          <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
+            <p className="text-xs font-medium text-purple-600 mb-1">Everyday hero</p>
+            <p className="text-base font-bold text-purple-900 leading-tight">Vrací zákazníky</p>
+            <p className="text-xs text-purple-500 mt-1">Primární akviziční produkt CZ</p>
           </div>
         </div>
       </div>
 
-      {/* Metrics Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* ── TWO-COLUMN DETAIL ──────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
         {/* Margin Risk */}
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-gray-900">Margin Risk</h3>
-            {analytics.margin_risk === 'Low' ? (
-              <CheckCircle className="text-green-600" size={24} />
-            ) : analytics.margin_risk === 'Medium' ? (
-              <AlertTriangle className="text-yellow-600" size={24} />
-            ) : (
-              <AlertTriangle className="text-red-600" size={24} />
-            )}
-          </div>
-
-          <p
-            className={`text-lg font-semibold mb-3 ${
-              riskColor === 'green'
-                ? 'text-green-700'
-                : riskColor === 'yellow'
-                  ? 'text-yellow-700'
-                  : 'text-red-700'
-            }`}
-          >
-            {analytics.margin_risk}
-          </p>
-
-          <p className="text-sm text-gray-600">
+            <h3 className="text-sm font-semibold text-gray-700">Margin Risk</h3>
             {analytics.margin_risk === 'Low'
-              ? 'Margin at risk: cost increases continue'
+              ? <CheckCircle size={18} className="text-green-500" />
+              : <AlertTriangle size={18} className={analytics.margin_risk === 'Medium' ? 'text-yellow-500' : 'text-red-500'} />
+            }
+          </div>
+          <p className={`text-xl font-bold mb-2 ${riskColor}`}>{analytics.margin_risk}</p>
+          <p className="text-sm text-gray-500">
+            {analytics.margin_risk === 'Low'
+              ? 'Marže stabilní, náklady pod kontrolou.'
               : analytics.margin_risk === 'Medium'
-                ? 'Some price changes detected'
-                : 'High price volatility detected'}
+                ? 'Některé cenové pohyby zaznamenány.'
+                : 'Vysoká volatilita cen — zkontroluj ceník.'}
           </p>
         </div>
 
         {/* Positioning */}
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-gray-900">Positioning</h3>
-            <TrendingUp className="text-blue-600" size={24} />
+            <h3 className="text-sm font-semibold text-gray-700">Positioning</h3>
+            <TrendingUp size={18} className="text-blue-500" />
           </div>
-
-          <p className="text-lg font-semibold text-blue-700 mb-3">Premium Position</p>
-
-          <p className="text-sm text-gray-600">
-            "The everyday Nuties hero — the product that brings customers back."
+          <p className="text-xl font-bold text-blue-700 mb-2">Premium pozice</p>
+          <p className="text-sm text-gray-500 mb-3">
+            „Everyday Nuties hero — produkt, který přivádí zákazníky zpět."
           </p>
-
-          <div className="mt-4 pt-4 border-t border-gray-200">
-            <p className="text-xs text-gray-600 font-medium">RECOMMENDED POSITIONING</p>
-            <p className="text-sm text-gray-900 mt-2">
-              Primary acquisition product for CZ market
-            </p>
+          <div className="pt-3 border-t border-gray-100">
+            <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-1">Doporučené</p>
+            <p className="text-sm text-gray-700">Primární akviziční produkt pro CZ trh</p>
           </div>
         </div>
       </div>
 
-      {/* Cenovy Koridor */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="font-semibold text-gray-900 mb-4">Cenový Koridor</h3>
-
+      {/* ── PRICE CORRIDOR ─────────────────────────────────────────────── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-gray-700 mb-4">Cenový Koridor</h3>
         <div className="space-y-4">
-          <div>
-            <div className="flex justify-between text-sm mb-2">
-              <span className="text-gray-600">Prozess (Prosince)</span>
-              <span className="font-medium text-gray-900">88</span>
+          {[
+            { label: 'Naše cena', value: 88, color: 'bg-blue-500' },
+            { label: 'Průměr konkurence', value: 85, color: 'bg-gray-400' },
+            { label: 'Min. cena (koridor)', value: 78, color: 'bg-yellow-500' },
+          ].map(({ label, value, color }) => (
+            <div key={label}>
+              <div className="flex justify-between text-sm mb-1.5">
+                <span className="text-gray-600">{label}</span>
+                <span className="font-semibold text-gray-900">{value}</span>
+              </div>
+              <div className="w-full bg-gray-100 rounded-full h-2">
+                <div className={`${color} h-2 rounded-full`} style={{ width: `${value}%` }} />
+              </div>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div className="bg-blue-600 h-2 rounded-full" style={{ width: '88%' }}></div>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex justify-between text-sm mb-2">
-              <span className="text-gray-600">Konkurence (Průměr)</span>
-              <span className="font-medium text-gray-900">85</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div className="bg-green-600 h-2 rounded-full" style={{ width: '85%' }}></div>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex justify-between text-sm mb-2">
-              <span className="text-gray-600">Opakovali (Min. Cena)</span>
-              <span className="font-medium text-gray-900">78</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div className="bg-yellow-600 h-2 rounded-full" style={{ width: '78%' }}></div>
-            </div>
-          </div>
+          ))}
         </div>
-
-        <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+        <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3">
           <p className="text-sm text-yellow-800">
-            <strong>Doporučení:</strong> Zachovat aktuální cenu. Okrajový nárůst pojistné ceny v prosinci by měl
-            pokračovat.
+            <span className="font-semibold">Doporučení:</span> Zachovat aktuální cenu. Nárůst v prosinci je v koridoru.
           </p>
         </div>
       </div>
 
-      {/* Recommendations */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="font-semibold text-gray-900 mb-4">Doporučení</h3>
-
-        <div className="space-y-3">
-          <div className="flex items-start space-x-3 p-3 bg-green-50 rounded-lg">
-            <CheckCircle className="text-green-600 flex-shrink-0 mt-1" size={20} />
+      {/* ── RECOMMENDATIONS ────────────────────────────────────────────── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-gray-700 mb-4">Doporučení</h3>
+        <div className="space-y-2">
+          <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg">
+            <CheckCircle size={16} className="text-green-600 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-medium text-gray-900">Akseptuj engine recommendation</p>
-              <p className="text-sm text-gray-600">Prosince pro price 89 -- keep margin</p>
+              <p className="text-sm font-medium text-gray-900">Přijmout doporučení enginu</p>
+              <p className="text-xs text-gray-500 mt-0.5">Prosincová cena 89 Kč — zachová marži</p>
             </div>
           </div>
-
-          <div className="flex items-start space-x-3 p-3 bg-yellow-50 rounded-lg">
-            <AlertTriangle className="text-yellow-600 flex-shrink-0 mt-1" size={20} />
+          <div className="flex items-start gap-3 p-3 bg-yellow-50 rounded-lg">
+            <AlertTriangle size={16} className="text-yellow-600 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-medium text-gray-900">Seasonal promo campaign</p>
-              <p className="text-sm text-gray-600">Review promo effectiveness for March period</p>
+              <p className="text-sm font-medium text-gray-900">Sezónní promo kampaň</p>
+              <p className="text-xs text-gray-500 mt-0.5">Zkontroluj efektivitu promo pro březnové období</p>
             </div>
           </div>
         </div>
