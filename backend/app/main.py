@@ -136,6 +136,29 @@ async def lifespan(app: FastAPI):
 # Create all tables
 Base.metadata.create_all(bind=engine)
 
+# Ensure performance indexes exist (idempotent — IF NOT EXISTS)
+def _ensure_indexes():
+    from sqlalchemy import text
+    ddl = [
+        # Catalog — name/category/manufacturer are unindexed by default but used in ilike search
+        "CREATE INDEX IF NOT EXISTS idx_cat_name      ON catalog_products (name)",
+        "CREATE INDEX IF NOT EXISTS idx_cat_category  ON catalog_products (category)",
+        "CREATE INDEX IF NOT EXISTS idx_cat_mfr       ON catalog_products (manufacturer)",
+        # Prices — latest-per-product subquery hits product_id + changed_at
+        "CREATE INDEX IF NOT EXISTS idx_prices_product_ts ON prices (product_id, changed_at DESC)",
+        # CompetitorProductPrice — bulk filter by product_id
+        "CREATE INDEX IF NOT EXISTS idx_cpp_product   ON competitor_product_prices (product_id)",
+    ]
+    try:
+        with engine.connect() as conn:
+            for stmt in ddl:
+                conn.execute(text(stmt))
+            conn.commit()
+    except Exception as e:
+        print(f"[startup] Index creation warning: {e}")
+
+_ensure_indexes()
+
 app = FastAPI(
     title="Pricing Management Software",
     description="API for pricing product management",

@@ -96,6 +96,8 @@ export default function CatalogPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkAdding, setBulkAdding] = useState(false)
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
+  // Pagination
+  const [limit, setLimit] = useState(200)
 
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -127,9 +129,12 @@ export default function CatalogPage() {
 
   const priceRange = PRICE_RANGES[priceRangeIdx]
 
-  // Products — fetch all matching server-side filters; weight is client-side
+  // Reset limit when filters change
+  const resetLimit = () => setLimit(200)
+
+  // Products — server-side filters; weight is client-side
   const { data: products = [], isLoading } = useQuery<CatalogProduct[]>({
-    queryKey: ['catalogProducts', selectedCategory, selectedManufacturer, searchTerm, selectedMarket, stockFilter, priceRangeIdx],
+    queryKey: ['catalogProducts', selectedCategory, selectedManufacturer, searchTerm, selectedMarket, stockFilter, priceRangeIdx, limit],
     queryFn: async () => {
       const params = new URLSearchParams()
       if (selectedCategory) params.append('category', selectedCategory)
@@ -139,8 +144,8 @@ export default function CatalogPage() {
       if (stockFilter === 'in_stock') params.append('in_stock', 'true')
       if (priceRange.min != null) params.append('min_price', String(priceRange.min))
       if (priceRange.max != null) params.append('max_price', String(priceRange.max))
-      const qs = params.toString()
-      const r = await fetch(`${API_BASE_URL}/catalog/products${qs ? `?${qs}` : ''}`)
+      params.append('limit', String(limit))
+      const r = await fetch(`${API_BASE_URL}/catalog/products?${params.toString()}`)
       if (!r.ok) return []
       return r.json()
     },
@@ -281,6 +286,7 @@ export default function CatalogPage() {
     setWeightRangeIdx(0)
     setPriceRangeIdx(0)
     setStockFilter('all')
+    resetLimit()
   }
 
   return (
@@ -290,7 +296,9 @@ export default function CatalogPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Katalog produktů</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {isLoading ? 'Načítám...' : `${sorted.length}${sorted.length !== products.length ? ` z ${products.length}` : ''} produktů · Vyber které chceš sledovat`}
+            {isLoading
+              ? 'Načítám...'
+              : `${sorted.length}${sorted.length !== products.length ? ` z ${products.length}` : ''} produktů${products.length >= limit ? ` (prvních ${limit})` : ''} · Vyber které chceš sledovat`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -320,7 +328,7 @@ export default function CatalogPage() {
             <input
               type="text"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => { setSearchTerm(e.target.value); resetLimit() }}
               placeholder="Název, EAN, kategorie, výrobce..."
               className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
@@ -728,6 +736,21 @@ export default function CatalogPage() {
               )
             })}
           </div>
+
+          {/* Load more / truncation notice */}
+          {products.length >= limit && (
+            <div className="px-4 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50">
+              <p className="text-xs text-gray-500">
+                Zobrazeno prvních <strong>{products.length}</strong> produktů — upřesněte hledání nebo načtěte více.
+              </p>
+              <button
+                onClick={() => setLimit(l => Math.min(l + 200, 1000))}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition"
+              >
+                Načíst dalších 200
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

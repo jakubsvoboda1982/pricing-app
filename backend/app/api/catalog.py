@@ -324,7 +324,7 @@ def get_catalog_products(
     min_price: float = Query(None, description="Minimální cena s DPH"),
     max_price: float = Query(None, description="Maximální cena s DPH"),
     skip: int = 0,
-    limit: int = 1000,
+    limit: int = Query(200, le=1000, description="Max výsledků (default 200, max 1000)"),
 ):
     """Získej produkty z katalogu s filtrem a obohacenými daty"""
     from app.models import Product as WatchedProduct
