@@ -9,6 +9,30 @@ import {
 } from 'lucide-react'
 import { API_BASE_URL, apiClient } from '@/api/client'
 
+// ── Multi-market helpers ──────────────────────────────────────────────────
+const EXCHANGE: Record<string, number> = {
+  CZK: 1,
+  EUR: 24.5,   // 1 EUR = 24.5 CZK
+  HUF: 0.0655, // 1 HUF ≈ 0.0655 CZK
+}
+const MARKET_CURRENCY: Record<string, string> = { CZ: 'CZK', SK: 'EUR', HU: 'HUF' }
+const MARKET_FLAG: Record<string, string>     = { CZ: '🇨🇿', SK: '🇸🇰', HU: '🇭🇺' }
+
+/** Convert amount in CZK → target market currency */
+function toMarket(czk: number, market: string): number {
+  const rate = EXCHANGE[MARKET_CURRENCY[market] ?? 'CZK'] ?? 1
+  return czk / rate
+}
+
+/** Format price in market currency */
+function fmtMkt(czk: number | null | undefined, market: string, decimals = 2): string {
+  if (czk == null) return '—'
+  const val = toMarket(czk, market)
+  const cur = MARKET_CURRENCY[market] ?? 'CZK'
+  const loc = market === 'SK' ? 'sk-SK' : market === 'HU' ? 'hu-HU' : 'cs-CZ'
+  return `${val.toLocaleString(loc, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })} ${cur}`
+}
+
 // ── Interfaces ─────────────────────────────────────────────────────────────
 
 interface CompetitorUrl { url: string; name: string; market: string }
@@ -443,6 +467,7 @@ export default function ProductDetailPage() {
   const [priceForm, setPriceForm] = useState({ current_price: '', old_price: '', market: 'CZ' })
   const [showPricingForm, setShowPricingForm] = useState<'purchase' | 'manufacturing' | null>(null)
   const [pricingForm, setPricingForm] = useState({ purchase_price_without_vat: '', purchase_vat_rate: '', manufacturing_cost: '' })
+  const [viewMarket, setViewMarket] = useState<string | null>(null) // null = auto (product.market)
   const [showAddUrl, setShowAddUrl] = useState(false)
   const [newUrl, setNewUrl] = useState('')
   const [newUrlMarket, setNewUrlMarket] = useState<'CZ' | 'SK'>('CZ')
@@ -634,11 +659,39 @@ export default function ProductDetailPage() {
   const manufacturingCostWithVat = product.manufacturing_cost_with_vat != null ? Number(product.manufacturing_cost_with_vat) : null
   const purchaseVatRate  = product.purchase_vat_rate != null ? Number(product.purchase_vat_rate) : 12
   const minPrice         = product.min_price != null ? Number(product.min_price) : null
-  const lowestComp       = product.lowest_competitor_price != null ? Number(product.lowest_competitor_price) : null
   const margin           = product.margin != null ? Number(product.margin) : null
   const heroScore        = product.hero_score ?? 0
   const competitorUrls   = product.competitor_urls || []
   const latestPrices     = (prices as PriceRecord[]).slice(0, 10)
+
+  // ── Multi-market ──────────────────────────────────────────────────────────
+  const availableMarkets = [...new Set(competitorUrls.map(u => u.market).filter(Boolean))]
+  if (availableMarkets.length === 0 && product.market) availableMarkets.push(product.market)
+  if (!availableMarkets.includes('CZ') && !availableMarkets.includes('SK')) availableMarkets.unshift('CZ')
+  const activeMarket = viewMarket ?? product.market ?? availableMarkets[0] ?? 'CZ'
+  const activeCurrency = MARKET_CURRENCY[activeMarket] ?? 'CZK'
+
+  // Filter competitor URLs and prices to active market
+  const filteredUrls = competitorUrls.filter(u => (u.market || 'CZ') === activeMarket)
+  const filteredPrices = (competitorPrices as CompetitorPriceRecord[]).filter(
+    cp => filteredUrls.some(u => u.url === cp.competitor_url)
+  )
+
+  // Lowest competitor price in CZK, then converted for display
+  const lowestCompCzk = (() => {
+    const vals = filteredPrices
+      .filter(cp => cp.price != null)
+      .map(cp => {
+        const rate = EXCHANGE[cp.currency ?? 'CZK'] ?? 1
+        return Number(cp.price) * rate // normalize to CZK
+      })
+    return vals.length ? Math.min(...vals) : null
+  })()
+  const lowestComp = lowestCompCzk // kept in CZK for margin calc
+
+  // Our price in the active market currency
+  const ourPriceInMarket = currentPrice != null ? toMarket(currentPrice, activeMarket) : null
+  const lowestCompInMarket = lowestCompCzk != null ? toMarket(lowestCompCzk, activeMarket) : null
 
   // Hero score breakdown
   const priceSet      = currentPrice != null ? 25 : 0
@@ -654,8 +707,8 @@ export default function ProductDetailPage() {
   const marginBg = margin == null ? 'bg-gray-50'
     : margin >= 20 ? 'bg-green-50' : margin >= 10 ? 'bg-yellow-50' : margin > 0 ? 'bg-orange-50' : 'bg-red-50'
 
-  // Price vs competitor comparison
-  const priceDiff = currentPrice != null && lowestComp != null ? currentPrice - lowestComp : null
+  // Price vs competitor comparison (in active market currency)
+  const priceDiff = ourPriceInMarket != null && lowestCompInMarket != null ? ourPriceInMarket - lowestCompInMarket : null
   const priceVsComp = priceDiff == null ? null : priceDiff <= 0 ? 'cheaper' : 'expensive'
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -716,6 +769,28 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
+      {/* ── MARKET SWITCHER ────────────────────────────────────────────── */}
+      {availableMarkets.length > 1 && (
+        <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl p-1 self-start w-fit">
+          {availableMarkets.map(m => (
+            <button
+              key={m}
+              onClick={() => setViewMarket(m)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                activeMarket === m
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              {MARKET_FLAG[m] ?? m} {m}
+              <span className={`text-xs ${activeMarket === m ? 'text-blue-200' : 'text-gray-400'}`}>
+                {MARKET_CURRENCY[m] ?? m}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ── KPI STRIP ──────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
 
@@ -724,25 +799,35 @@ export default function ProductDetailPage() {
           <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Aktuální cena</p>
           {currentPrice != null ? (
             <>
-              <p className="text-2xl font-bold text-blue-700 leading-none">{currentPrice.toLocaleString('cs-CZ')}</p>
-              <p className="text-sm text-gray-400 mt-0.5">CZK</p>
+              <p className="text-2xl font-bold text-blue-700 leading-none">
+                {toMarket(currentPrice, activeMarket).toLocaleString(
+                  activeMarket === 'SK' ? 'sk-SK' : activeMarket === 'HU' ? 'hu-HU' : 'cs-CZ',
+                  { minimumFractionDigits: activeMarket === 'CZ' ? 0 : 2, maximumFractionDigits: activeMarket === 'CZ' ? 0 : 2 }
+                )}
+              </p>
+              <p className="text-sm text-gray-400 mt-0.5">{activeCurrency}</p>
+              {activeMarket !== 'CZ' && (
+                <p className="text-xs text-gray-400 mt-0.5">{currentPrice.toLocaleString('cs-CZ')} CZK</p>
+              )}
               {product.old_price != null && (
                 <p className="text-xs text-gray-400 line-through mt-1">
-                  {Number(product.old_price).toLocaleString('cs-CZ')} CZK
+                  {fmtMkt(Number(product.old_price), activeMarket)}
                 </p>
               )}
             </>
           ) : product.catalog_price_vat != null ? (
             <>
-              <p className="text-2xl font-bold text-gray-700 leading-none">{Number(product.catalog_price_vat).toLocaleString('cs-CZ')}</p>
-              <p className="text-sm text-gray-400 mt-0.5">CZK</p>
+              <p className="text-2xl font-bold text-gray-700 leading-none">
+                {toMarket(Number(product.catalog_price_vat), activeMarket).toLocaleString('cs-CZ', { maximumFractionDigits: 2 })}
+              </p>
+              <p className="text-sm text-gray-400 mt-0.5">{activeCurrency}</p>
               <p className="text-xs text-indigo-500 mt-1">z katalogu</p>
             </>
           ) : (
             <p className="text-sm text-gray-400 mt-1">Nenastaveno</p>
           )}
           {product.catalog_price_vat != null && currentPrice != null && (
-            <p className="text-xs text-gray-400 mt-1">Katalog: {Number(product.catalog_price_vat).toLocaleString('cs-CZ')} CZK</p>
+            <p className="text-xs text-gray-400 mt-1">Katalog: {fmtMkt(Number(product.catalog_price_vat), activeMarket)}</p>
           )}
           <button
             onClick={() => { setShowPriceForm(!showPriceForm); setShowPricingForm(null) }}
@@ -769,20 +854,29 @@ export default function ProductDetailPage() {
 
         {/* Nejnižší konkurent */}
         <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Nejnižší konkurent</p>
-          {lowestComp != null ? (
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">
+            Nejnižší konkurent {availableMarkets.length > 1 && <span className="text-gray-300">({activeMarket})</span>}
+          </p>
+          {lowestCompInMarket != null ? (
             <>
-              <p className="text-2xl font-bold text-gray-900 leading-none">{lowestComp.toLocaleString('cs-CZ')}</p>
-              <p className="text-sm text-gray-400 mt-0.5">CZK</p>
+              <p className="text-2xl font-bold text-gray-900 leading-none">
+                {lowestCompInMarket.toLocaleString(
+                  activeMarket === 'SK' ? 'sk-SK' : activeMarket === 'HU' ? 'hu-HU' : 'cs-CZ',
+                  { minimumFractionDigits: activeMarket === 'CZ' ? 0 : 2, maximumFractionDigits: activeMarket === 'CZ' ? 0 : 2 }
+                )}
+              </p>
+              <p className="text-sm text-gray-400 mt-0.5">{activeCurrency}</p>
               {priceDiff != null && (
                 <p className={`text-xs mt-1 font-medium ${priceVsComp === 'cheaper' ? 'text-green-600' : 'text-orange-600'}`}>
-                  {priceVsComp === 'cheaper' ? '✓ Jsi nejlevnější' : `+${priceDiff.toLocaleString('cs-CZ')} CZK nad min.`}
+                  {priceVsComp === 'cheaper'
+                    ? '✓ Jsi nejlevnější'
+                    : `+${Math.abs(priceDiff).toLocaleString('cs-CZ', { maximumFractionDigits: 2 })} ${activeCurrency} nad min.`}
                 </p>
               )}
             </>
           ) : (
             <p className="text-sm text-gray-400 mt-1">
-              {competitorUrls.length === 0 ? 'Přidej konkurenty' : 'Načítám...'}
+              {filteredUrls.length === 0 ? 'Přidej konkurenty' : 'Načítám...'}
             </p>
           )}
         </div>
@@ -1103,7 +1197,7 @@ export default function ProductDetailPage() {
           )}
 
           {/* Lowest price banner */}
-          {lowestComp != null && currentPrice != null && (
+          {lowestCompInMarket != null && ourPriceInMarket != null && (
             <div className={`mx-5 mt-4 px-4 py-3 rounded-xl border flex items-center justify-between text-sm ${
               priceVsComp === 'cheaper' ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'
             }`}>
@@ -1114,13 +1208,13 @@ export default function ProductDetailPage() {
                 }
                 <span className={`text-xs font-medium ${priceVsComp === 'cheaper' ? 'text-green-800' : 'text-orange-800'}`}>
                   {priceVsComp === 'cheaper'
-                    ? `Jsi nejlevnější — min. o ${Math.abs(priceDiff!).toLocaleString('cs-CZ')} CZK`
-                    : `Jsi dražší o ${priceDiff!.toLocaleString('cs-CZ')} CZK než nejlevnější konkurent`
+                    ? `Jsi nejlevnější — min. o ${Math.abs(priceDiff!).toLocaleString('cs-CZ', { maximumFractionDigits: 2 })} ${activeCurrency}`
+                    : `Jsi dražší o ${priceDiff!.toLocaleString('cs-CZ', { maximumFractionDigits: 2 })} ${activeCurrency} než nejlevnější konkurent`
                   }
                 </span>
               </div>
               <span className={`text-xs font-bold ${priceVsComp === 'cheaper' ? 'text-green-700' : 'text-orange-700'}`}>
-                min. {lowestComp.toLocaleString('cs-CZ')} CZK
+                min. {lowestCompInMarket.toLocaleString('cs-CZ', { maximumFractionDigits: 2 })} {activeCurrency}
               </span>
             </div>
           )}
@@ -1138,14 +1232,19 @@ export default function ProductDetailPage() {
                 </button>
               </div>
             ) : (
-              competitorUrls.map((item) => {
-                const priceRecord = competitorPrices.find(cp => cp.competitor_url === item.url)
+              filteredUrls.map((item) => {
+                const priceRecord = (competitorPrices as CompetitorPriceRecord[]).find(cp => cp.competitor_url === item.url)
                 const isEditing = editingPriceId === (priceRecord?.id ?? item.url)
                 const isHistoryOpen = expandedHistoryId === priceRecord?.id
                 const history = priceRecord ? (historyData[priceRecord.id] ?? []) : []
                 const hasPrice = priceRecord?.price != null
-                const isCheaper = hasPrice && currentPrice != null && Number(priceRecord!.price) < currentPrice
-                const isExpensive = hasPrice && currentPrice != null && Number(priceRecord!.price) > currentPrice
+                // Compare in CZK (normalize competitor price to CZK for comparison)
+                const cpPriceCzk = hasPrice ? Number(priceRecord!.price) * (EXCHANGE[priceRecord!.currency ?? 'CZK'] ?? 1) : null
+                const isCheaper = cpPriceCzk != null && currentPrice != null && cpPriceCzk < currentPrice
+                const isExpensive = cpPriceCzk != null && currentPrice != null && cpPriceCzk > currentPrice
+                // Display price in competitor's native currency
+                const dispPrice = hasPrice ? Number(priceRecord!.price) : null
+                const dispCurrency = priceRecord?.currency ?? activeCurrency
 
                 return (
                   <div key={item.url} className={`rounded-xl border overflow-hidden transition ${
@@ -1171,7 +1270,7 @@ export default function ProductDetailPage() {
                       <div className="text-right flex-shrink-0">
                         {hasPrice ? (
                           <p className={`text-base font-bold ${isCheaper ? 'text-red-600' : isExpensive ? 'text-green-700' : 'text-gray-800'}`}>
-                            {Number(priceRecord!.price).toLocaleString('cs-CZ')} CZK
+                            {dispPrice!.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {dispCurrency}
                           </p>
                         ) : (
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
