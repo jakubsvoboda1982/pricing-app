@@ -181,20 +181,19 @@ function ConfirmedMatchesSection({ productId }: { productId: string }) {
     setPipelineMsg(null)
     try {
       const urls = pipelineListingUrl.trim() ? [pipelineListingUrl.trim()] : undefined
-      await apiClient.runMatchingPipeline(productId, pipelineCompetitorId, urls)
-      setPipelineMsg('✓ Pipeline spuštěn na pozadí. Výsledky se objeví za chvíli v záložce Párovací centrum.')
+      const result = await apiClient.runMatchingPipeline(productId, pipelineCompetitorId, urls)
+      if (result?.note) {
+        setPipelineMsg(`✓ Pipeline spuštěn. ⚠ ${result.note}`)
+      } else {
+        setPipelineMsg('✓ Pipeline spuštěn na pozadí. Výsledky se objeví za chvíli v záložce Párovací centrum.')
+      }
       setTimeout(() => {
         refetch()
         qc.invalidateQueries({ queryKey: ['product-matches-proposed', productId] })
       }, 5000)
     } catch (e: any) {
       const raw: string = e?.message ?? 'neznámá chyba'
-      // Přeložíme technické chyby backendu do srozumitelného textu
-      if (raw.includes('canonical') || raw.includes('ingredient')) {
-        setPipelineMsg('⚠ Produkt nemá vyplněný profil pro párování. Propojte ho s Katalogem produktů nebo ho naimportujte z XML feedu — systém pak automaticky detekuje ingredienci a parametry.')
-      } else {
-        setPipelineMsg(`Chyba: ${raw}`)
-      }
+      setPipelineMsg(`Chyba: ${raw}`)
     } finally {
       setPipelineRunning(false)
     }

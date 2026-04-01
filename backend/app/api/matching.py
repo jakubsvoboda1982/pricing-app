@@ -411,14 +411,11 @@ async def run_pipeline(
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
-    # Ověříme canonical attrs
-    attrs = product.canonical_attributes_json or {}
-    if not attrs.get("ingredient"):
-        raise HTTPException(
-            status_code=400,
-            detail="Produkt nemá vyplněné canonical atributy (ingredient). "
-                   "Nejprve propojte produkt s katalogem nebo doplňte atributy ručně."
-        )
+    # Poznámka: canonical_attributes_json.ingredient není povinný – scoring engine
+    # funguje i bez něj (použije porovnání názvů). Produkty bez profilu dostanou
+    # nižší skóre, ale pipeline proběhne a navrhne nejlepší shody.
+
+    has_profile = bool((product.canonical_attributes_json or {}).get("ingredient"))
 
     async def run_bg():
         from app.database import SessionLocal
@@ -446,6 +443,8 @@ async def run_pipeline(
         "product_name": product.name,
         "competitor_id": body.competitor_id,
         "competitor_name": competitor.name,
+        "has_profile": has_profile,
+        "note": None if has_profile else "Produkt nemá plný profil — výsledky budou porovnány jen podle názvu. Pro přesnější matching propojte produkt s katalogem.",
     }
 
 
