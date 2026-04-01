@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ExternalLink, Plus, Trash2, Edit2, Save, X, Package, TrendingUp, Link2, ShoppingCart } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Plus, Trash2, Edit2, Save, X, Package, TrendingUp, Link2, ShoppingCart, Factory } from 'lucide-react'
 import { API_BASE_URL } from '@/api/client'
 
 interface CompetitorUrl {
@@ -27,6 +27,7 @@ interface Product {
   purchase_vat_rate?: number | null
   purchase_price_with_vat?: number | null
   manufacturing_cost?: number | null
+  manufacturing_cost_with_vat?: number | null
   min_price?: number | null
   margin?: number | null
   hero_score?: number | null
@@ -123,9 +124,8 @@ export default function ProductDetailPage() {
 
   const [showPriceForm, setShowPriceForm] = useState(false)
   const [priceForm, setPriceForm] = useState({ current_price: '', old_price: '', market: 'CZ' })
-  const [showPricingForm, setShowPricingForm] = useState(false)
-  const [pricingForm, setPricingForm] = useState({ purchase_price_without_vat: '', purchase_vat_rate: '', manufacturing_cost: '', min_price: '' })
-  const [costType, setCostType] = useState<'manufacturing' | 'purchase'>('purchase')
+  const [showPricingForm, setShowPricingForm] = useState<'purchase' | 'manufacturing' | null>(null)
+  const [pricingForm, setPricingForm] = useState({ purchase_price_without_vat: '', purchase_vat_rate: '', manufacturing_cost: '' })
   const [showAddUrl, setShowAddUrl] = useState(false)
   const [newUrl, setNewUrl] = useState('')
   const [newUrlMarket, setNewUrlMarket] = useState<'CZ' | 'SK'>('CZ')
@@ -169,7 +169,7 @@ export default function ProductDetailPage() {
   })
 
   const setPricingMutation = useMutation({
-    mutationFn: async (data: { purchase_price_without_vat?: number; purchase_vat_rate?: number; manufacturing_cost?: number; min_price?: number }) => {
+    mutationFn: async (data: { purchase_price_without_vat?: number; purchase_vat_rate?: number; manufacturing_cost?: number; min_price?: number; clear_purchase_price?: boolean; clear_manufacturing_cost?: boolean }) => {
       const res = await fetch(`${API_BASE_URL}/products/${id}/pricing`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -181,7 +181,7 @@ export default function ProductDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['product', id] })
       queryClient.invalidateQueries({ queryKey: ['products'] })
-      setShowPricingForm(false)
+      setShowPricingForm(null)
     },
   })
 
@@ -220,21 +220,26 @@ export default function ProductDetailPage() {
 
   const handleSetPricing = () => {
     const pvr = pricingForm.purchase_vat_rate ? parseFloat(pricingForm.purchase_vat_rate.replace(',', '.')) : purchaseVatRate
-    const baseCost = costType === 'manufacturing'
-      ? (pricingForm.manufacturing_cost ? parseFloat(pricingForm.manufacturing_cost.replace(',', '.')) : undefined)
-      : (pricingForm.purchase_price_without_vat ? parseFloat(pricingForm.purchase_price_without_vat.replace(',', '.')) : undefined)
 
-    if (!baseCost) return
+    if (showPricingForm === 'purchase') {
+      const cost = parseFloat(pricingForm.purchase_price_without_vat.replace(',', '.'))
+      if (isNaN(cost) || cost <= 0) return
+      const minPriceWithVat = cost * (1 + pvr / 100)
+      setPricingMutation.mutate({ purchase_price_without_vat: cost, purchase_vat_rate: pvr, min_price: minPriceWithVat })
+    } else if (showPricingForm === 'manufacturing') {
+      const cost = parseFloat(pricingForm.manufacturing_cost.replace(',', '.'))
+      if (isNaN(cost) || cost <= 0) return
+      const minPriceWithVat = cost * (1 + pvr / 100)
+      setPricingMutation.mutate({ manufacturing_cost: cost, purchase_vat_rate: pvr, min_price: minPriceWithVat })
+    }
+  }
 
-    // Auto-calculate min_price with VAT: baseCost * (1 + VAT/100)
-    const minPriceWithVat = baseCost * (1 + pvr / 100)
+  const handleClearPurchasePrice = () => {
+    setPricingMutation.mutate({ clear_purchase_price: true })
+  }
 
-    setPricingMutation.mutate({
-      ...(costType === 'manufacturing' && baseCost !== undefined && { manufacturing_cost: baseCost }),
-      ...(costType === 'purchase' && baseCost !== undefined && { purchase_price_without_vat: baseCost }),
-      ...(pvr !== undefined && { purchase_vat_rate: pvr }),
-      min_price: minPriceWithVat,
-    })
+  const handleClearManufacturingCost = () => {
+    setPricingMutation.mutate({ clear_manufacturing_cost: true })
   }
 
   if (isLoading || !product) {
@@ -242,11 +247,11 @@ export default function ProductDetailPage() {
   }
 
   const currentPrice = product.current_price != null ? Number(product.current_price) : null
-  const manufacturingCost = product.manufacturing_cost != null ? Number(product.manufacturing_cost) : null
   const purchasePriceWithoutVat = product.purchase_price_without_vat != null ? Number(product.purchase_price_without_vat) : null
+  const purchasePriceWithVat = product.purchase_price_with_vat != null ? Number(product.purchase_price_with_vat) : null
+  const manufacturingCost = product.manufacturing_cost != null ? Number(product.manufacturing_cost) : null
+  const manufacturingCostWithVat = product.manufacturing_cost_with_vat != null ? Number(product.manufacturing_cost_with_vat) : null
   const purchaseVatRate = product.purchase_vat_rate != null ? Number(product.purchase_vat_rate) : 12
-  const baseCostWithoutVat = manufacturingCost ?? purchasePriceWithoutVat // Use manufacturing cost if available, else purchase cost
-  const purchasePriceWithVat = baseCostWithoutVat != null ? baseCostWithoutVat * (1 + purchaseVatRate / 100) : null
   const minPrice = product.min_price != null ? Number(product.min_price) : null
   const lowestCompetitorPrice = product.lowest_competitor_price != null ? Number(product.lowest_competitor_price) : null
   const margin = product.margin != null ? Number(product.margin) : null
@@ -256,7 +261,8 @@ export default function ProductDetailPage() {
 
   // Hero Score breakdown
   const priceSet = currentPrice != null ? 25 : 0
-  const purchaseSet = purchasePriceWithVat != null ? 15 : 0
+  const hasCost = (purchasePriceWithoutVat != null && purchasePriceWithoutVat > 0) || (manufacturingCost != null && manufacturingCost > 0)
+  const purchaseSet = hasCost ? 15 : 0
   const competitorSet = competitorUrls.length >= 1 ? 15 : 0
   const minSet = minPrice != null ? 10 : 0
   const marginPts = heroScore - priceSet - purchaseSet - competitorSet - minSet
@@ -318,7 +324,7 @@ export default function ProductDetailPage() {
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-gray-900">Cenotvorba</h2>
             <div className="flex gap-2">
-              <button onClick={() => { setShowPriceForm(!showPriceForm); setShowPricingForm(false) }}
+              <button onClick={() => { setShowPriceForm(!showPriceForm); setShowPricingForm(null) }}
                 className="flex items-center gap-1 text-xs text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200 transition">
                 <Edit2 size={13} /> Upravit ručně
               </button>
@@ -387,25 +393,149 @@ export default function ProductDetailPage() {
 
           {/* Pricing details */}
           <div className="space-y-0">
-            {/* Base cost (manufacturing or purchase) */}
-            <div className="flex items-center justify-between py-2 border-b border-gray-50 group">
-              <span className="text-sm text-gray-500 flex items-center gap-1.5">
-                <ShoppingCart size={13} className="text-gray-400" /> {manufacturingCost != null ? 'Výrobní' : 'Nákupní'} cena (bez DPH)
-              </span>
-              <div className="flex items-center gap-2">
-                {baseCostWithoutVat != null ? (
-                  <div className="text-right">
-                    <span className="text-sm font-medium text-gray-800">{fmt(baseCostWithoutVat)} CZK</span>
-                    <p className="text-xs text-gray-400">DPH: {fmt(purchaseVatRate, 0)}% → {fmt(purchasePriceWithVat)} CZK s DPH</p>
-                  </div>
-                ) : (
-                  <span className="text-xs text-gray-400">Nenastaveno</span>
-                )}
-                <button onClick={() => { setShowPricingForm(!showPricingForm); setShowPriceForm(false) }}
-                  className="opacity-0 group-hover:opacity-100 transition text-gray-400 hover:text-blue-600">
-                  <Edit2 size={12} />
-                </button>
+
+            {/* Nákupní cena */}
+            <div className="py-2 border-b border-gray-50">
+              <div className="flex items-center justify-between group">
+                <span className="text-sm text-gray-500 flex items-center gap-1.5">
+                  <ShoppingCart size={13} className="text-gray-400" /> Nákupní cena (bez DPH)
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {purchasePriceWithoutVat != null ? (
+                    <div className="text-right">
+                      <span className="text-sm font-medium text-gray-800">{fmt(purchasePriceWithoutVat)} CZK</span>
+                      <p className="text-xs text-gray-400">DPH: {fmt(purchaseVatRate, 0)}% → {fmt(purchasePriceWithVat)} CZK s DPH</p>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-400">Nenastaveno</span>
+                  )}
+                  <button
+                    onClick={() => { setShowPricingForm(showPricingForm === 'purchase' ? null : 'purchase'); setShowPriceForm(false); setPricingForm(p => ({ ...p, purchase_price_without_vat: purchasePriceWithoutVat ? String(purchasePriceWithoutVat) : '' })) }}
+                    className="opacity-0 group-hover:opacity-100 transition text-gray-400 hover:text-blue-600 p-0.5">
+                    <Edit2 size={12} />
+                  </button>
+                  {purchasePriceWithoutVat != null && (
+                    <button
+                      onClick={handleClearPurchasePrice}
+                      disabled={setPricingMutation.isPending}
+                      className="opacity-0 group-hover:opacity-100 transition text-gray-400 hover:text-red-500 p-0.5">
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Inline edit form – nákupní cena */}
+              {showPricingForm === 'purchase' && (
+                <div className="mt-2 p-3 bg-blue-50 rounded-lg space-y-2 border border-blue-100">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-600">Nákupní cena bez DPH *</label>
+                      <input type="text" value={pricingForm.purchase_price_without_vat}
+                        onChange={(e) => setPricingForm(p => ({ ...p, purchase_price_without_vat: e.target.value }))}
+                        placeholder="200.00" autoFocus
+                        className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600">Sazba DPH (%)</label>
+                      <input type="text" value={pricingForm.purchase_vat_rate}
+                        onChange={(e) => setPricingForm(p => ({ ...p, purchase_vat_rate: e.target.value }))}
+                        placeholder={String(purchaseVatRate)}
+                        className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600">Min. cena s DPH (auto)</label>
+                      <div className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 rounded text-sm bg-white text-gray-700">
+                        {(() => {
+                          const c = parseFloat(pricingForm.purchase_price_without_vat.replace(',', '.'))
+                          const v = parseFloat(pricingForm.purchase_vat_rate.replace(',', '.') || String(purchaseVatRate))
+                          return !isNaN(c) && c > 0 ? fmt(c * (1 + v / 100)) : '—'
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500">* CZ potraviny obvykle 12%, ostatní položky 21%</p>
+                  <div className="flex gap-2">
+                    <button onClick={handleSetPricing} disabled={setPricingMutation.isPending}
+                      className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs disabled:opacity-50">
+                      <Save size={12} />{setPricingMutation.isPending ? 'Ukládám...' : 'Uložit'}
+                    </button>
+                    <button onClick={() => setShowPricingForm(null)} className="text-gray-500 px-3 py-1 rounded text-xs hover:bg-gray-100">Zrušit</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Výrobní cena */}
+            <div className="py-2 border-b border-gray-50">
+              <div className="flex items-center justify-between group">
+                <span className="text-sm text-gray-500 flex items-center gap-1.5">
+                  <Factory size={13} className="text-gray-400" /> Výrobní cena (bez DPH)
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {manufacturingCost != null ? (
+                    <div className="text-right">
+                      <span className="text-sm font-medium text-gray-800">{fmt(manufacturingCost)} CZK</span>
+                      <p className="text-xs text-gray-400">DPH: {fmt(purchaseVatRate, 0)}% → {fmt(manufacturingCostWithVat)} CZK s DPH</p>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-400">Nenastaveno</span>
+                  )}
+                  <button
+                    onClick={() => { setShowPricingForm(showPricingForm === 'manufacturing' ? null : 'manufacturing'); setShowPriceForm(false); setPricingForm(p => ({ ...p, manufacturing_cost: manufacturingCost ? String(manufacturingCost) : '' })) }}
+                    className="opacity-0 group-hover:opacity-100 transition text-gray-400 hover:text-blue-600 p-0.5">
+                    <Edit2 size={12} />
+                  </button>
+                  {manufacturingCost != null && (
+                    <button
+                      onClick={handleClearManufacturingCost}
+                      disabled={setPricingMutation.isPending}
+                      className="opacity-0 group-hover:opacity-100 transition text-gray-400 hover:text-red-500 p-0.5">
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Inline edit form – výrobní cena */}
+              {showPricingForm === 'manufacturing' && (
+                <div className="mt-2 p-3 bg-orange-50 rounded-lg space-y-2 border border-orange-100">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-600">Výrobní cena bez DPH *</label>
+                      <input type="text" value={pricingForm.manufacturing_cost}
+                        onChange={(e) => setPricingForm(p => ({ ...p, manufacturing_cost: e.target.value }))}
+                        placeholder="150.00" autoFocus
+                        className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600">Sazba DPH (%)</label>
+                      <input type="text" value={pricingForm.purchase_vat_rate}
+                        onChange={(e) => setPricingForm(p => ({ ...p, purchase_vat_rate: e.target.value }))}
+                        placeholder={String(purchaseVatRate)}
+                        className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600">Min. cena s DPH (auto)</label>
+                      <div className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 rounded text-sm bg-white text-gray-700">
+                        {(() => {
+                          const c = parseFloat(pricingForm.manufacturing_cost.replace(',', '.'))
+                          const v = parseFloat(pricingForm.purchase_vat_rate.replace(',', '.') || String(purchaseVatRate))
+                          return !isNaN(c) && c > 0 ? fmt(c * (1 + v / 100)) : '—'
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500">* CZ potraviny obvykle 12%, ostatní položky 21%</p>
+                  <div className="flex gap-2">
+                    <button onClick={handleSetPricing} disabled={setPricingMutation.isPending}
+                      className="flex items-center gap-1 bg-orange-600 hover:bg-orange-700 text-white px-3 py-1 rounded text-xs disabled:opacity-50">
+                      <Save size={12} />{setPricingMutation.isPending ? 'Ukládám...' : 'Uložit'}
+                    </button>
+                    <button onClick={() => setShowPricingForm(null)} className="text-gray-500 px-3 py-1 rounded text-xs hover:bg-gray-100">Zrušit</button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between py-2 border-b border-gray-50">
@@ -428,7 +558,7 @@ export default function ProductDetailPage() {
                   {fmt(margin, 1)} %
                 </span>
               ) : (
-                <span className="text-xs text-gray-400">— (nastav nákupní cenu)</span>
+                <span className="text-xs text-gray-400">— (nastav nákupní nebo výrobní cenu)</span>
               )}
             </div>
 
@@ -437,79 +567,6 @@ export default function ProductDetailPage() {
               <span className="text-sm font-medium text-gray-700">{product.market || 'CZ'}</span>
             </div>
           </div>
-
-          {/* Pricing edit form (purchase price + min price) */}
-          {showPricingForm && (
-            <div className="p-3 bg-gray-50 rounded-lg space-y-3 border border-gray-200">
-              <p className="text-xs font-medium text-gray-700">Cenotvorba: vyberte typ produktu a zadejte cenu bez DPH</p>
-
-              {/* Cost type selector */}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setCostType('purchase')}
-                  className={`px-3 py-1.5 rounded text-xs font-medium transition ${costType === 'purchase' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-700'}`}>
-                  Nákupovaný (nákupní cena)
-                </button>
-                <button
-                  onClick={() => setCostType('manufacturing')}
-                  className={`px-3 py-1.5 rounded text-xs font-medium transition ${costType === 'manufacturing' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-700'}`}>
-                  Vlastní výroba (výrobní cena)
-                </button>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                {/* Cost field (either purchase or manufacturing) */}
-                <div>
-                  <label className="text-xs text-gray-600">{costType === 'manufacturing' ? 'Výrobní cena bez DPH *' : 'Nákupní cena bez DPH *'}</label>
-                  <input
-                    type="text"
-                    value={costType === 'manufacturing' ? pricingForm.manufacturing_cost : pricingForm.purchase_price_without_vat}
-                    onChange={(e) => {
-                      if (costType === 'manufacturing') {
-                        setPricingForm(p => ({ ...p, manufacturing_cost: e.target.value }))
-                      } else {
-                        setPricingForm(p => ({ ...p, purchase_price_without_vat: e.target.value }))
-                      }
-                    }}
-                    placeholder={costType === 'manufacturing' ? '150.00' : '200.00'}
-                    className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-
-                {/* VAT rate */}
-                <div>
-                  <label className="text-xs text-gray-600">Sazba DPH (%)</label>
-                  <input
-                    type="text"
-                    value={pricingForm.purchase_vat_rate}
-                    onChange={(e) => setPricingForm(p => ({ ...p, purchase_vat_rate: e.target.value }))}
-                    placeholder={fmt(purchaseVatRate, 0)}
-                    className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-
-                {/* Auto-calculated minimum price with VAT */}
-                <div>
-                  <label className="text-xs text-gray-600">Minimální cena s DPH (auto)</label>
-                  <div className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm bg-white text-gray-900 font-medium flex items-center">
-                    {(() => {
-                      const baseCost = costType === 'manufacturing'
-                        ? (pricingForm.manufacturing_cost ? parseFloat(pricingForm.manufacturing_cost.replace(',', '.')) : null)
-                        : (pricingForm.purchase_price_without_vat ? parseFloat(pricingForm.purchase_price_without_vat.replace(',', '.')) : null)
-                      const vat = pricingForm.purchase_vat_rate ? parseFloat(pricingForm.purchase_vat_rate.replace(',', '.')) : purchaseVatRate
-                      return baseCost != null ? fmt(baseCost * (1 + vat / 100)) : '—'
-                    })()}
-                  </div>
-                </div>
-              </div>
-              <p className="text-xs text-gray-500">* CZ potraviny obvykle 12%, ostatní položky 21%</p>
-              <div className="flex gap-2">
-                <button onClick={handleSetPricing} disabled={setPricingMutation.isPending}
-                  className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs disabled:opacity-50">
-                  <Save size={12} />{setPricingMutation.isPending ? 'Ukládám...' : 'Uložit'}
-                </button>
-                <button onClick={() => setShowPricingForm(false)} className="text-gray-500 px-3 py-1 rounded text-xs hover:bg-gray-100">Zrušit</button>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* MIDDLE: Ceny konkurentů */}

@@ -25,6 +25,8 @@ class PricingUpdate(BaseModel):
     purchase_vat_rate: Optional[Decimal] = None           # Sazba DPH (default 12 pro CZ)
     manufacturing_cost: Optional[Decimal] = None          # Výrobní cena
     min_price: Optional[Decimal] = None
+    clear_purchase_price: bool = False    # True = smaž nákupní cenu
+    clear_manufacturing_cost: bool = False  # True = smaž výrobní cenu
 
 
 def _get_domain_name(url: str) -> str:
@@ -32,9 +34,24 @@ def _get_domain_name(url: str) -> str:
     return match.group(1) if match else url
 
 
+def _lower_cost_with_vat(
+    purchase_price_without_vat: Optional[Decimal],
+    manufacturing_cost: Optional[Decimal],
+    vat_rate: Decimal,
+) -> Optional[Decimal]:
+    """Vrátí nižší z nákupní/výrobní ceny s DPH (pokud není 0 nebo None)."""
+    candidates = []
+    for cost in [purchase_price_without_vat, manufacturing_cost]:
+        if cost is not None and cost > 0:
+            candidates.append(cost * (1 + vat_rate / Decimal('100')))
+    if not candidates:
+        return None
+    return min(candidates)
+
+
 def _compute_hero_score(
     current_price: Optional[Decimal],
-    purchase_price_with_vat: Optional[Decimal],
+    cost_with_vat: Optional[Decimal],   # nižší z nákupní/výrobní (s DPH)
     min_price: Optional[Decimal],
     competitor_urls: Optional[list],
 ) -> int:
@@ -43,7 +60,7 @@ def _compute_hero_score(
 
     Složení:
       25  Aktuální cena nastavena
-      15  Nákupní cena nastavena
+      15  Nákupní/výrobní cena nastavena
       35  Kvalita marže (0 / 5 / 10 / 18 / 28 / 35)
       10  Minimální cena nastavena
       15  Sleduje alespoň 1 URL konkurenta
@@ -53,11 +70,11 @@ def _compute_hero_score(
     if current_price is not None:
         score += 25
 
-    if purchase_price_with_vat is not None:
+    if cost_with_vat is not None:
         score += 15
-        # Marže = (prodejní - nákupní_s_DPH) / prodejní * 100
+        # Marže = (prodejní - nižší_cena_s_DPH) / prodejní * 100
         if current_price and current_price > 0:
-            margin_pct = (current_price - purchase_price_with_vat) / current_price * 100
+            margin_pct = (current_price - cost_with_vat) / current_price * 100
             if margin_pct >= 30:
                 score += 35
             elif margin_pct >= 20:
@@ -68,7 +85,6 @@ def _compute_hero_score(
                 score += 10
             elif margin_pct > 0:
                 score += 5
-            # margin <= 0 → 0 bodů (prodáváme pod nákupní cenou)
 
     if min_price is not None:
         score += 10
@@ -89,20 +105,32 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
 
     current_price = price.current_price if price else None
     purchase_price_without_vat = getattr(product, 'purchase_price_without_vat', None)
-    purchase_vat_rate = getattr(product, 'purchase_vat_rate', Decimal('12.00'))
+    manufacturing_cost = getattr(product, 'manufacturing_cost', None)
+    purchase_vat_rate = getattr(product, 'purchase_vat_rate', None) or Decimal('12.00')
     min_price = getattr(product, 'min_price', None)
     competitor_urls = product.competitor_urls or []
 
-    # Calculate purchase price with VAT
-    purchase_price_with_vat = None
-    if purchase_price_without_vat and purchase_vat_rate is not None:
-        purchase_price_with_vat = purchase_price_without_vat * (1 + purchase_vat_rate / Decimal('100'))
-        purchase_price_with_vat = round(purchase_price_with_vat, 2)
+    # Nižší z nákupní/výrobní ceny s DPH — základ pro marži
+    cost_with_vat = _lower_cost_with_vat(purchase_price_without_vat, manufacturing_cost, purchase_vat_rate)
 
-    # Marže v procentech (using VAT-inclusive price)
+    # Purchase price with VAT (jen pro zobrazení nákupní ceny)
+    purchase_price_with_vat = None
+    if purchase_price_without_vat and purchase_price_without_vat > 0:
+        purchase_price_with_vat = round(
+            purchase_price_without_vat * (1 + purchase_vat_rate / Decimal('100')), 2
+        )
+
+    # Manufacturing cost with VAT (jen pro zobrazení)
+    manufacturing_cost_with_vat = None
+    if manufacturing_cost and manufacturing_cost > 0:
+        manufacturing_cost_with_vat = round(
+            manufacturing_cost * (1 + purchase_vat_rate / Decimal('100')), 2
+        )
+
+    # Marže z nižší z cen
     margin = None
-    if current_price and purchase_price_with_vat and current_price > 0:
-        margin = (current_price - purchase_price_with_vat) / current_price * Decimal('100')
+    if current_price and cost_with_vat and current_price > 0:
+        margin = (current_price - cost_with_vat) / current_price * Decimal('100')
         margin = round(margin, 2)
 
     # Get lowest competitor price
@@ -139,7 +167,7 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
     except Exception:
         pass  # CompetitorProductPrice table may not exist yet
 
-    hero_score = _compute_hero_score(current_price, purchase_price_with_vat, min_price, competitor_urls)
+    hero_score = _compute_hero_score(current_price, cost_with_vat, min_price, competitor_urls)
 
     return {
         'id': product.id,
@@ -159,6 +187,8 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
         'purchase_price_without_vat': purchase_price_without_vat,
         'purchase_vat_rate': purchase_vat_rate,
         'purchase_price_with_vat': purchase_price_with_vat,
+        'manufacturing_cost': manufacturing_cost,
+        'manufacturing_cost_with_vat': manufacturing_cost_with_vat,
         'min_price': min_price,
         'margin': margin,
         'hero_score': hero_score,
@@ -258,12 +288,18 @@ def update_pricing(
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
-    if data.purchase_price_without_vat is not None:
+    if data.clear_purchase_price:
+        product.purchase_price_without_vat = None
+    elif data.purchase_price_without_vat is not None:
         product.purchase_price_without_vat = data.purchase_price_without_vat
+
+    if data.clear_manufacturing_cost:
+        product.manufacturing_cost = None
+    elif data.manufacturing_cost is not None:
+        product.manufacturing_cost = data.manufacturing_cost
+
     if data.purchase_vat_rate is not None:
         product.purchase_vat_rate = data.purchase_vat_rate
-    if data.manufacturing_cost is not None:
-        product.manufacturing_cost = data.manufacturing_cost
     if data.min_price is not None:
         product.min_price = data.min_price
 
