@@ -296,13 +296,34 @@ async def refresh_single_url(
     payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    """Znovu načti cenu pro jednu URL konkurenta."""
+    """Znovu načti cenu pro jednu URL konkurenta. Pokud záznam neexistuje, vytvoří ho."""
     comp_price = db.query(CompetitorProductPrice).filter(
         CompetitorProductPrice.product_id == product_id,
         CompetitorProductPrice.competitor_url == url,
     ).first()
     if not comp_price:
-        raise HTTPException(status_code=404, detail="URL není sledována")
+        # Auto-vytvoř tracking záznam pro URL, která ještě nemá CompetitorProductPrice
+        from app.models import Product as ProductModel
+        product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Produkt nenalezen")
+        # Zjisti market z competitor_urls JSONu
+        market = "CZ"
+        for url_item in (product.competitor_urls or []):
+            item_url = url_item.get("url") if isinstance(url_item, dict) else url_item
+            if item_url == url:
+                market = url_item.get("market", "CZ") if isinstance(url_item, dict) else "CZ"
+                break
+        comp_price = CompetitorProductPrice(
+            product_id=product_id,
+            competitor_url=url,
+            currency="CZK" if market == "CZ" else "EUR",
+            market=market,
+            fetch_status="pending",
+        )
+        db.add(comp_price)
+        db.commit()
+        db.refresh(comp_price)
 
     try:
         price = await scrape_competitor_price(comp_price.competitor_url)
