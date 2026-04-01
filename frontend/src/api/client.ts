@@ -229,7 +229,7 @@ export class APIClient {
     return this.request('GET', `/competitors/alerts${qs ? `?${qs}` : ''}`)
   }
 
-  async dismissCompetitorAlert(alertId: string) {
+  async dismissAlert(alertId: string) {
     return this.request('PUT', `/competitors/alerts/${alertId}/dismiss`)
   }
 
@@ -316,17 +316,15 @@ export class APIClient {
     return this.request('POST', `/recommendations/generate/${productId}`)
   }
 
-  async getRecommendation(recommendationId: string) {
-    return this.request('GET', `/recommendations/${recommendationId}`)
+  async getRecommendations(status?: string) {
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    const qs = params.toString()
+    return this.request('GET', `/recommendations${qs ? `?${qs}` : ''}`)
   }
 
-  async listRecommendations(status?: string) {
-    const qs = status ? `?status=${status}` : ''
-    return this.request('GET', `/recommendations${qs}`)
-  }
-
-  async approveRecommendation(recommendationId: string, data?: any) {
-    return this.request('POST', `/recommendations/${recommendationId}/approve`, data || {})
+  async approveRecommendation(recommendationId: string) {
+    return this.request('POST', `/recommendations/${recommendationId}/approve`)
   }
 
   async rejectRecommendation(recommendationId: string) {
@@ -337,13 +335,42 @@ export class APIClient {
     return this.request('POST', `/recommendations/${recommendationId}/apply`)
   }
 
-  // Hero Products
-  async calculateHeroScore(data: any) {
-    return this.request('POST', '/hero/calculate', data)
+  async listRecommendations(status?: string) {
+    return this.getRecommendations(status)
   }
 
-  async listHeroProducts() {
-    return this.request('GET', '/hero/products')
+  // Watchlist
+  async addToWatchlist(productId: string) {
+    return this.request('POST', `/watchlist/${productId}`)
+  }
+
+  async getWatchlist() {
+    return this.request('GET', '/watchlist')
+  }
+
+  async listWatchlist() {
+    return this.getWatchlist()
+  }
+
+  async removeFromWatchlist(productId: string) {
+    return this.request('DELETE', `/watchlist/${productId}`)
+  }
+
+  async togglePriceAlert(productId: string) {
+    return this.request('PUT', `/watchlist/${productId}/toggle-price-alert`)
+  }
+
+  async toggleStockAlert(productId: string) {
+    return this.request('PUT', `/watchlist/${productId}/toggle-stock-alert`)
+  }
+
+  // Hero
+  async calculateHeroScore(productId: string) {
+    return this.request('POST', `/hero/${productId}/calculate`)
+  }
+
+  async listHeroes() {
+    return this.request('GET', '/hero')
   }
 
   async getHeroScore(productId: string) {
@@ -351,64 +378,20 @@ export class APIClient {
   }
 
   // Seasonality
-  async createSeasonalityRule(data: any) {
-    return this.request('POST', '/seasonality/rules', data)
+  async listSeasonalityRules() {
+    return this.request('GET', '/seasonality')
   }
 
-  async listSeasonalityRules(category?: string) {
-    const qs = category ? `?category=${category}` : ''
-    return this.request('GET', `/seasonality/rules${qs}`)
+  async getSeasonalityRule(month: number) {
+    return this.request('GET', `/seasonality/${month}`)
   }
 
-  async getSeasonalityCalendar(category?: string) {
-    const qs = category ? `?category=${category}` : ''
-    return this.request('GET', `/seasonality/calendar${qs}`)
+  async updateSeasonalityRule(month: number, data: any) {
+    return this.request('PUT', `/seasonality/${month}`, data)
   }
 
-  async deleteSeasonalityRule(ruleId: string) {
-    return this.request('DELETE', `/seasonality/rules/${ruleId}`)
-  }
-
-  // Watchlist
-  async addToWatchlist(productId: string) {
-    return this.request('POST', `/watchlist/add/${productId}`)
-  }
-
-  async removeFromWatchlist(productId: string) {
-    return this.request('DELETE', `/watchlist/remove/${productId}`)
-  }
-
-  async listWatchlist() {
-    return this.request('GET', '/watchlist')
-  }
-
-  async togglePriceAlert(watchedId: string) {
-    return this.request('POST', `/watchlist/${watchedId}/toggle-price-alert`)
-  }
-
-  async toggleStockAlert(watchedId: string) {
-    return this.request('POST', `/watchlist/${watchedId}/toggle-stock-alert`)
-  }
-
-  // Alerts
-  async listAlerts(status?: string, severity?: string) {
-    const params = new URLSearchParams()
-    if (status) params.set('status', status)
-    if (severity) params.set('severity', severity)
-    const qs = params.toString()
-    return this.request('GET', `/alerts${qs ? `?${qs}` : ''}`)
-  }
-
-  async markAlertRead(alertId: string) {
-    return this.request('POST', `/alerts/${alertId}/read`)
-  }
-
-  async dismissAlert(alertId: string) {
-    return this.request('POST', `/alerts/${alertId}/dismiss`)
-  }
-
-  async getAlertsStats() {
-    return this.request('GET', '/alerts/stats')
+  async getAnnualCalendar() {
+    return this.request('GET', '/seasonality/calendar/annual')
   }
 }
 

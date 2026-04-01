@@ -14,13 +14,11 @@ from .feed_subscription import FeedSubscription
 from .competitor_product_price import CompetitorProductPrice, CompetitorPriceHistory
 from .baselinker import BaselinkerConfig
 from .recommendation import PriceRecommendation
-from .hero import HeroScore
-from .seasonality import SeasonalityRule
 from .watchlist import WatchedProduct
 
 __all__ = [
     "Company", "User", "Product", "Price", "AuditLog", "Analytics", "LoginAttempt",
     "CatalogProduct", "Competitor", "CompetitorPrice", "CompetitorRank", "CompetitorAlert",
     "FeedSubscription", "CompetitorProductPrice", "CompetitorPriceHistory", "BaselinkerConfig",
-    "PriceRecommendation", "HeroScore", "SeasonalityRule", "WatchedProduct"
+    "PriceRecommendation", "WatchedProduct"
 ]
