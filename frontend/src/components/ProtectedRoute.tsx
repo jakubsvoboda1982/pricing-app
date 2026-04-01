@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 
@@ -8,14 +7,10 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, adminOnly = false }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading, user, checkAuth } = useAuthStore()
+  const { isAuthenticated, isLoading, user } = useAuthStore()
 
-  useEffect(() => {
-    if (!isAuthenticated && isLoading) {
-      checkAuth()
-    }
-  }, [isAuthenticated, isLoading, checkAuth])
-
+  // isLoading=true pouze pokud token existuje a čekáme na ověření ze serveru
+  // (checkAuth se volá v AppRoutes.useEffect — zde ho neopakujeme)
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">

@@ -13,12 +13,18 @@ interface AuthStore {
   checkAuth: () => Promise<void>
 }
 
+const _token = localStorage.getItem('access_token')
+// Pokud máme token, okamžitě nastavíme isAuthenticated=true a isLoading=true
+// (ověříme na pozadí — app se renderuje hned, nezobrazuje spinner)
+// Pokud token nemáme, rovnou isLoading=false a jdeme na login
+if (_token) apiClient.setToken(_token)
+
 export const useAuthStore = create<AuthStore>(
   (set) => ({
     user: null,
-    token: localStorage.getItem('access_token'),
-    isAuthenticated: false,
-    isLoading: true,
+    token: _token,
+    isAuthenticated: !!_token,
+    isLoading: !!_token,
 
     login: async (email: string, password: string) => {
       const response = await apiClient.login(email, password)
@@ -27,21 +33,13 @@ export const useAuthStore = create<AuthStore>(
       apiClient.setToken(token)
 
       const user = await apiClient.getCurrentUser()
-      set({
-        token,
-        user,
-        isAuthenticated: true,
-      })
+      set({ token, user, isAuthenticated: true, isLoading: false })
     },
 
     logout: () => {
       localStorage.removeItem('access_token')
       apiClient.clearToken()
-      set({
-        user: null,
-        token: null,
-        isAuthenticated: false,
-      })
+      set({ user: null, token: null, isAuthenticated: false, isLoading: false })
     },
 
     setUser: (user: User | null) => {
@@ -58,21 +56,12 @@ export const useAuthStore = create<AuthStore>(
       apiClient.setToken(token)
       try {
         const user = await apiClient.getCurrentUser()
-        set({
-          user,
-          token,
-          isAuthenticated: true,
-          isLoading: false,
-        })
+        set({ user, token, isAuthenticated: true, isLoading: false })
       } catch {
+        // Token expiroval nebo je neplatný — odhlásíme
         localStorage.removeItem('access_token')
         apiClient.clearToken()
-        set({
-          user: null,
-          token: null,
-          isAuthenticated: false,
-          isLoading: false,
-        })
+        set({ user: null, token: null, isAuthenticated: false, isLoading: false })
       }
     },
   })

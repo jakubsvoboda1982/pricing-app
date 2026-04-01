@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
+from collections import defaultdict
 from app.database import get_db
 from app.schemas.product import ProductCreate, ProductUpdate, ProductResponse, PriceResponse, PriceCreate, CompetitorUrlItem
 from app.models import Product, Price, CatalogProduct, Company
@@ -101,13 +102,30 @@ def _compute_hero_score(
     return min(score, 100)
 
 
-def _enrich_with_price(product: Product, db: Session) -> dict:
-    """Přidej poslední cenu, marži a hero score k produktu."""
+def _enrich_with_price(
+    product: Product,
+    db: Session,
+    *,
+    _price=None,       # pre-loaded Price (batch optimisation)
+    _comp_prices=None, # pre-loaded list[CompetitorProductPrice]
+    _cat=None,         # pre-loaded CatalogProduct
+) -> dict:
+    """
+    Přidej poslední cenu, marži a hero score k produktu.
+    Pokud jsou předány _price/_comp_prices/_cat, přeskočí DB dotazy
+    (využívá se z list_products pro batch loading).
+    """
     from app.models import CompetitorProductPrice
 
-    price = db.query(Price).filter(
-        Price.product_id == product.id
-    ).order_by(desc(Price.changed_at)).first()
+    # ── Price ──────────────────────────────────────────────────────────────
+    if _price is None:
+        _price = (
+            db.query(Price)
+            .filter(Price.product_id == product.id)
+            .order_by(desc(Price.changed_at))
+            .first()
+        )
+    price = _price
 
     current_price = price.current_price if price else None
     purchase_price_without_vat = getattr(product, 'purchase_price_without_vat', None)
@@ -119,40 +137,36 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
     # Nižší z nákupní/výrobní ceny s DPH — základ pro marži
     cost_with_vat = _lower_cost_with_vat(purchase_price_without_vat, manufacturing_cost, purchase_vat_rate)
 
-    # Purchase price with VAT (jen pro zobrazení nákupní ceny)
     purchase_price_with_vat = None
     if purchase_price_without_vat and purchase_price_without_vat > 0:
         purchase_price_with_vat = round(
             purchase_price_without_vat * (1 + purchase_vat_rate / Decimal('100')), 2
         )
 
-    # Manufacturing cost with VAT (jen pro zobrazení)
     manufacturing_cost_with_vat = None
     if manufacturing_cost and manufacturing_cost > 0:
         manufacturing_cost_with_vat = round(
             manufacturing_cost * (1 + purchase_vat_rate / Decimal('100')), 2
         )
 
-    # Marže z nižší z cen
     margin = None
     if current_price and cost_with_vat and current_price > 0:
         margin = (current_price - cost_with_vat) / current_price * Decimal('100')
         margin = round(margin, 2)
 
-    # Get lowest competitor price
+    # ── Competitor prices ──────────────────────────────────────────────────
     lowest_competitor_price = None
     competitor_products = []
     try:
-        comp_prices = db.query(CompetitorProductPrice).filter(
-            CompetitorProductPrice.product_id == product.id
-        ).all()
-
+        comp_prices = _comp_prices if _comp_prices is not None else (
+            db.query(CompetitorProductPrice)
+            .filter(CompetitorProductPrice.product_id == product.id)
+            .all()
+        )
         if comp_prices:
             prices_with_values = [cp for cp in comp_prices if cp.price is not None]
             if prices_with_values:
                 lowest_competitor_price = min(cp.price for cp in prices_with_values)
-
-            # Build competitor products list for response
             competitor_products = [
                 {
                     'id': cp.id,
@@ -171,19 +185,21 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
                 for cp in comp_prices
             ]
     except Exception:
-        pass  # CompetitorProductPrice table may not exist yet
+        pass
 
     hero_score = _compute_hero_score(current_price, cost_with_vat, min_price, competitor_urls)
 
-    # Katalogová data (manufacturer, catalog cena, katalog sklad)
+    # ── Catalog data ───────────────────────────────────────────────────────
     manufacturer = None
     catalog_price_vat = None
     catalog_quantity_in_stock = None
     if product.catalog_product_id:
         try:
-            cat = db.query(CatalogProduct).filter(
-                CatalogProduct.id == product.catalog_product_id
-            ).first()
+            cat = _cat if _cat is not None else (
+                db.query(CatalogProduct)
+                .filter(CatalogProduct.id == product.catalog_product_id)
+                .first()
+            )
             if cat:
                 manufacturer = cat.manufacturer
                 catalog_quantity_in_stock = cat.quantity_in_stock
@@ -232,8 +248,62 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
 
 @router.get("/", response_model=list[ProductResponse])
 def list_products(db: Session = Depends(get_db)):
+    """
+    Batch-optimized list: fetches prices, competitor prices and catalog data
+    in 4 queries total instead of 3×N (N+1 fix).
+    """
+    from app.models import CompetitorProductPrice
+
     products = db.query(Product).all()
-    return [ProductResponse(**_enrich_with_price(p, db)) for p in products]
+    if not products:
+        return []
+
+    product_ids = [p.id for p in products]
+
+    # 1. Latest price per product (one subquery + join)
+    latest_ts_subq = (
+        db.query(Price.product_id, func.max(Price.changed_at).label("max_ts"))
+        .filter(Price.product_id.in_(product_ids))
+        .group_by(Price.product_id)
+        .subquery()
+    )
+    latest_prices = (
+        db.query(Price)
+        .join(
+            latest_ts_subq,
+            (Price.product_id == latest_ts_subq.c.product_id)
+            & (Price.changed_at == latest_ts_subq.c.max_ts),
+        )
+        .all()
+    )
+    price_map = {str(p.product_id): p for p in latest_prices}
+
+    # 2. All competitor prices in one query
+    comp_prices_all = (
+        db.query(CompetitorProductPrice)
+        .filter(CompetitorProductPrice.product_id.in_(product_ids))
+        .all()
+    )
+    comp_map: dict = defaultdict(list)
+    for cp in comp_prices_all:
+        comp_map[str(cp.product_id)].append(cp)
+
+    # 3. All linked catalog products in one query
+    catalog_ids = [p.catalog_product_id for p in products if p.catalog_product_id]
+    cat_map = {}
+    if catalog_ids:
+        cats = db.query(CatalogProduct).filter(CatalogProduct.id.in_(catalog_ids)).all()
+        cat_map = {str(c.id): c for c in cats}
+
+    return [
+        ProductResponse(**_enrich_with_price(
+            p, db,
+            _price=price_map.get(str(p.id)),
+            _comp_prices=comp_map.get(str(p.id), []),
+            _cat=cat_map.get(str(p.catalog_product_id)) if p.catalog_product_id else None,
+        ))
+        for p in products
+    ]
 
 
 @router.post("/", response_model=ProductResponse)

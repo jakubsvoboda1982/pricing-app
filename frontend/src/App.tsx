@@ -28,7 +28,16 @@ import WatchlistPage from './pages/WatchlistPage'
 import MatchReviewPage from './pages/MatchReviewPage'
 import { useAuthStore } from './store/auth'
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,          // data jsou "čerstvá" 30 s — žádné zbytečné refetch
+      gcTime: 5 * 60_000,         // cache 5 min
+      refetchOnWindowFocus: false, // nerušit při přepínání tabů
+      retry: 1,                   // max 1 retry při chybě (ne 3)
+    },
+  },
+})
 
 function AppRoutes() {
   const checkAuth = useAuthStore((state) => state.checkAuth)
