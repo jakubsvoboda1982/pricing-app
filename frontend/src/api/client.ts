@@ -490,6 +490,14 @@ export class APIClient {
   async rescoreMatches(productId: string, competitorId: string) {
     return this.request('POST', `/matching/rescore/${productId}/${competitorId}`)
   }
+
+  // Bulk link to catalog
+  async bulkLinkCatalog(productIds?: string[], force = false) {
+    return this.request('POST', '/products/bulk-link-catalog', {
+      product_ids: productIds ?? null,
+      force,
+    })
+  }
 }
 
 export const apiClient = new APIClient()

@@ -30,6 +30,11 @@ class PricingUpdate(BaseModel):
     clear_manufacturing_cost: bool = False  # True = smaž výrobní cenu
 
 
+class BulkLinkCatalogRequest(BaseModel):
+    product_ids: Optional[list[str]] = None  # None = všechny nepropojené
+    force: bool = False                       # True = přepiš i existující propojení
+
+
 def _get_domain_name(url: str) -> str:
     match = re.search(r'https?://(?:www\.)?([^/]+)', url)
     return match.group(1) if match else url
@@ -375,6 +380,176 @@ def update_pricing(
     db.commit()
     db.refresh(product)
     return ProductResponse(**_enrich_with_price(product, db))
+
+
+@router.post("/bulk-link-catalog")
+def bulk_link_catalog(
+    body: BulkLinkCatalogRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Hromadné propojení sledovaných produktů s katalogem.
+
+    Párování dle priority (od nejpřesnějšího):
+      1. EAN          – přesná shoda čárového kódu
+      2. PRODUCTNO    – product_code z XML feedu (Heureka)
+      3. SKU = PRODUCTNO katalogu  – SKU produktu odpovídá product_code v katalogu
+      4. Jméno        – Jaccard ≥ 70 % normalizovaných tokenů
+
+    Po nalezení shody:
+      - Nastaví catalog_product_id
+      - Propaguje canonical atributy (ingredient, processing, …) pokud ještě nejsou
+      - Doplní cenu z katalogu pokud produkt nemá žádnou cenu
+      - Doplní EAN a obrázek z katalogu pokud chybí
+    """
+    from app.normalization.normalizer import build_product_profile, normalize_text
+
+    company = db.query(Company).first()
+    if not company:
+        raise HTTPException(status_code=400, detail="Žádná společnost")
+
+    # Produkty k zpracování
+    if body.product_ids:
+        products_q = db.query(Product).filter(
+            Product.id.in_(body.product_ids),
+            Product.company_id == company.id,
+        ).all()
+    else:
+        q = db.query(Product).filter(Product.company_id == company.id)
+        if not body.force:
+            q = q.filter(Product.catalog_product_id.is_(None))
+        products_q = q.all()
+
+    if not products_q:
+        return {"linked": 0, "already_linked": 0, "not_found": 0, "details": [], "not_found_list": []}
+
+    # Načti všechny aktivní katalogové produkty firmy
+    catalog_all = db.query(CatalogProduct).filter(
+        CatalogProduct.company_id == company.id,
+        CatalogProduct.is_active == True,
+    ).all()
+
+    # Indexy pro O(1) lookup
+    by_ean: dict[str, CatalogProduct] = {}
+    by_product_code: dict[str, CatalogProduct] = {}
+    for cp in catalog_all:
+        if cp.ean:
+            by_ean[cp.ean.strip()] = cp
+        if cp.product_code:
+            by_product_code[cp.product_code.strip().upper()] = cp
+
+    linked_list = []
+    already_linked_list = []
+    not_found_list = []
+
+    for product in products_q:
+        # Přeskoč propojené (pokud není force)
+        if product.catalog_product_id and not body.force:
+            already_linked_list.append({"id": str(product.id), "name": product.name})
+            continue
+
+        match: Optional[CatalogProduct] = None
+        match_reason = ""
+
+        # 1. EAN
+        if product.ean:
+            match = by_ean.get(product.ean.strip())
+            if match:
+                match_reason = "ean"
+
+        # 2. PRODUCTNO (product_code produktu = product_code katalogu)
+        if not match and product.product_code:
+            match = by_product_code.get(product.product_code.strip().upper())
+            if match:
+                match_reason = "product_code"
+
+        # 3. SKU produktu = product_code katalogu
+        if not match and product.sku:
+            match = by_product_code.get(product.sku.strip().upper())
+            if match:
+                match_reason = "sku_as_productcode"
+
+        # 4. Jméno – Jaccard similarity ≥ 70 %
+        if not match:
+            norm_name = normalize_text(product.name)
+            toks_a = set(norm_name.split())
+            best_score = 0.0
+            best_cp = None
+            for cp in catalog_all:
+                toks_b = set(normalize_text(cp.name).split())
+                if not toks_a or not toks_b:
+                    continue
+                score = len(toks_a & toks_b) / len(toks_a | toks_b)
+                if score > best_score:
+                    best_score = score
+                    best_cp = cp
+            if best_score >= 0.70 and best_cp:
+                match = best_cp
+                match_reason = f"name_jaccard_{best_score:.2f}"
+
+        if not match:
+            not_found_list.append({"id": str(product.id), "name": product.name})
+            continue
+
+        # ── Propojení ───────────────────────────────────────────────────────
+        product.catalog_product_id = match.id
+
+        # Propaguj canonical atributy (jen pokud ještě nemá ingredient)
+        existing_attrs = product.canonical_attributes_json or {}
+        if not existing_attrs.get("ingredient"):
+            try:
+                attrs, profile = build_product_profile(
+                    match.name,
+                    category=match.category,
+                    manufacturer=match.manufacturer,
+                    description=match.description,
+                )
+                product.canonical_attributes_json = attrs.to_dict()
+                product.target_weight_g = product.target_weight_g or attrs.target_weight_g
+                product.must_have_terms_json = profile.must_have_terms
+                product.should_have_terms_json = profile.should_have_terms
+                product.must_not_have_terms_json = profile.must_not_have_terms
+            except Exception:
+                pass  # Canonical error nesmí zastavit bulk
+
+        # Doplň cenu z katalogu pokud produkt nemá žádnou
+        if match.price_without_vat and match.vat_rate:
+            existing_price = db.query(Price).filter(
+                Price.product_id == product.id
+            ).order_by(desc(Price.changed_at)).first()
+            if not existing_price:
+                price_vat = match.price_without_vat * (1 + match.vat_rate / 100)
+                db.add(Price(
+                    product_id=product.id,
+                    market=match.market or "CZ",
+                    currency="CZK" if (match.market or "CZ") == "CZ" else "EUR",
+                    current_price=price_vat,
+                ))
+
+        # Doplň EAN, obrázek, product_code z katalogu pokud chybí
+        if not product.ean and match.ean:
+            product.ean = match.ean
+        if not product.thumbnail_url and match.thumbnail_url:
+            product.thumbnail_url = match.thumbnail_url
+        if not product.product_code and match.product_code:
+            product.product_code = match.product_code
+
+        linked_list.append({
+            "id": str(product.id),
+            "name": product.name,
+            "catalog_name": match.name,
+            "match_reason": match_reason,
+        })
+
+    db.commit()
+
+    return {
+        "linked": len(linked_list),
+        "already_linked": len(already_linked_list),
+        "not_found": len(not_found_list),
+        "details": linked_list,
+        "not_found_list": not_found_list,
+    }
 
 
 @router.delete("/{product_id}")

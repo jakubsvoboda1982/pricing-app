@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, Link2, Upload, Trash2, ExternalLink, Package, AlertCircle, TrendingDown, X } from 'lucide-react'
+import { Search, Plus, Link2, Upload, Trash2, ExternalLink, Package, AlertCircle, TrendingDown, X, RefreshCw, CheckCircle } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { useNavigate } from 'react-router-dom'
 import { useMarketStore, shouldShowMarket } from '@/store/market'
@@ -19,10 +19,20 @@ interface Product {
   catalog_quantity_in_stock?: number | null; created_at: string
 }
 
+interface LinkResult {
+  linked: number
+  already_linked: number
+  not_found: number
+  details: { id: string; name: string; catalog_name: string; match_reason: string }[]
+  not_found_list: { id: string; name: string }[]
+}
+
 export default function ProductsPage() {
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [linkResult, setLinkResult] = useState<LinkResult | null>(null)
+  const [linkLoading, setLinkLoading] = useState(false)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const selectedMarket = useMarketStore(state => state.selectedMarket)
@@ -47,6 +57,20 @@ export default function ProductsPage() {
       || (p.product_code ?? '').toLowerCase().includes(q)
     return matchSearch && shouldShowMarket(p.market, selectedMarket)
   })
+
+  const handleBulkLink = async (ids?: string[]) => {
+    setLinkLoading(true)
+    setLinkResult(null)
+    try {
+      const result = await apiClient.bulkLinkCatalog(ids)
+      setLinkResult(result)
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    } catch (e: any) {
+      setLinkResult({ linked: 0, already_linked: 0, not_found: 0, details: [], not_found_list: [] })
+    } finally {
+      setLinkLoading(false)
+    }
+  }
 
   const allSelected = filtered.length > 0 && filtered.every(p => selectedIds.has(p.id))
   const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(filtered.map(p => p.id)))
@@ -73,6 +97,15 @@ export default function ProductsPage() {
           <p className="text-sm text-gray-400 mt-0.5">Produkty s aktuálními cenami a doporučeními.</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleBulkLink()}
+            disabled={linkLoading}
+            title="Automaticky propojí všechny nepropojené produkty s Katalogem dle EAN / PRODUCTNO / SKU / jména"
+            className="flex items-center gap-1.5 bg-white border border-indigo-200 hover:bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-60">
+            {linkLoading
+              ? <><RefreshCw size={14} className="animate-spin" /> Propojuji…</>
+              : <><Link2 size={14} /> Propojit s katalogem</>}
+          </button>
           <button onClick={() => navigate('/catalog')}
             className="flex items-center gap-1.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-sm transition">
             <Plus size={14} /> Přidat
@@ -83,6 +116,64 @@ export default function ProductsPage() {
           </button>
         </div>
       </div>
+
+      {/* ── LINK RESULT TOAST ─────────────────────────────────────────── */}
+      {linkResult && (
+        <div className="bg-white border border-gray-200 rounded-xl px-5 py-4 space-y-3 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle size={16} className="text-green-600" />
+              <span className="text-sm font-semibold text-gray-800">Výsledek propojení</span>
+            </div>
+            <button onClick={() => setLinkResult(null)} className="text-gray-400 hover:text-gray-600">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="text-center bg-green-50 rounded-lg p-3 border border-green-100">
+              <p className="text-2xl font-bold text-green-700">{linkResult.linked}</p>
+              <p className="text-xs text-green-600 mt-0.5">Nově propojeno</p>
+            </div>
+            <div className="text-center bg-gray-50 rounded-lg p-3 border border-gray-100">
+              <p className="text-2xl font-bold text-gray-600">{linkResult.already_linked}</p>
+              <p className="text-xs text-gray-500 mt-0.5">Již propojeno</p>
+            </div>
+            <div className={`text-center rounded-lg p-3 border ${linkResult.not_found > 0 ? 'bg-yellow-50 border-yellow-100' : 'bg-gray-50 border-gray-100'}`}>
+              <p className={`text-2xl font-bold ${linkResult.not_found > 0 ? 'text-yellow-700' : 'text-gray-400'}`}>{linkResult.not_found}</p>
+              <p className={`text-xs mt-0.5 ${linkResult.not_found > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>Nenalezeno v katalogu</p>
+            </div>
+          </div>
+          {linkResult.details.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Propojené produkty:</p>
+              {linkResult.details.map(d => {
+                const reason = d.match_reason.startsWith('name_jaccard')
+                  ? `jméno ${d.match_reason.replace('name_jaccard_', '')}` : d.match_reason
+                return (
+                  <div key={d.id} className="flex items-center gap-2 text-xs">
+                    <CheckCircle size={11} className="text-green-500 flex-shrink-0" />
+                    <span className="text-gray-700 truncate flex-1">{d.name}</span>
+                    <span className="text-gray-400">→</span>
+                    <span className="text-gray-600 truncate flex-1">{d.catalog_name}</span>
+                    <span className="text-xs bg-gray-100 text-gray-500 px-1.5 rounded flex-shrink-0">{reason}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {linkResult.not_found_list.length > 0 && (
+            <div className="space-y-1 max-h-28 overflow-y-auto">
+              <p className="text-xs font-medium text-yellow-600 uppercase tracking-wide">Nenalezeno (doplňte ručně nebo importujte z XML feedu):</p>
+              {linkResult.not_found_list.map(d => (
+                <div key={d.id} className="flex items-center gap-2 text-xs">
+                  <AlertCircle size={11} className="text-yellow-500 flex-shrink-0" />
+                  <span className="text-gray-600 truncate">{d.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── KPI STRIP ──────────────────────────────────────────────────── */}
       {all.length > 0 && (
@@ -349,14 +440,23 @@ export default function ProductsPage() {
 
       {/* Bulk bar */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-3 rounded-xl shadow-xl flex items-center gap-4 z-50">
-          <span className="text-sm font-medium">{selectedIds.size} produktů vybráno</span>
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-3 rounded-xl shadow-xl flex items-center gap-3 z-50 flex-wrap max-w-xl">
+          <span className="text-sm font-medium whitespace-nowrap">{selectedIds.size} produktů vybráno</span>
           <button onClick={() => setSelectedIds(new Set())} className="text-xs text-gray-400 hover:text-white flex items-center gap-1">
-            <X size={12} /> Zrušit výběr
+            <X size={12} /> Zrušit
+          </button>
+          <button
+            onClick={() => { handleBulkLink([...selectedIds]); setSelectedIds(new Set()) }}
+            disabled={linkLoading}
+            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
+            {linkLoading
+              ? <RefreshCw size={13} className="animate-spin" />
+              : <Link2 size={13} />}
+            Propojit s katalogem
           </button>
           <button onClick={() => { selectedIds.forEach(id => deleteMutation.mutate(id)); setSelectedIds(new Set()) }}
-            className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm font-medium transition">
-            <Trash2 size={13} /> Odebrat vše
+            className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
+            <Trash2 size={13} /> Odebrat
           </button>
         </div>
       )}
