@@ -133,6 +133,8 @@ function GradeBadge({ grade }: { grade: string | null }) {
   )
 }
 
+interface CompetitorOption { id: string; name: string; url: string }
+
 function ConfirmedMatchesSection({ productId }: { productId: string }) {
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -142,6 +144,20 @@ function ConfirmedMatchesSection({ productId }: { productId: string }) {
   const [pipelineRunning, setPipelineRunning] = useState(false)
   const [pipelineMsg, setPipelineMsg] = useState<string | null>(null)
   const [expandedMatchId, setExpandedMatchId] = useState<string | null>(null)
+
+  // Načti seznam konkurentů pro dropdown
+  const { data: competitors = [] } = useQuery<CompetitorOption[]>({
+    queryKey: ['competitors-list'],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/competitors`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
+      })
+      if (!res.ok) return []
+      const data = await res.json()
+      return (data as any[]).map((c: any) => ({ id: c.id, name: c.name, url: c.url }))
+    },
+    staleTime: 60000,
+  })
 
   // Fetch active (approved) matches for this product
   const { data: activeMatches = [], isLoading, refetch } = useQuery<ProductMatch[]>({
@@ -222,16 +238,31 @@ function ConfirmedMatchesSection({ productId }: { productId: string }) {
           <p className="text-xs font-semibold text-blue-800">Spustit matching pipeline</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div>
-              <label className="text-xs text-gray-600 font-medium block mb-1">UUID Konkurenta *</label>
-              <input
+              <label className="text-xs text-gray-600 font-medium block mb-1">Konkurent *</label>
+              <select
                 value={pipelineCompetitorId}
-                onChange={e => setPipelineCompetitorId(e.target.value)}
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                className="w-full text-xs border border-gray-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300 font-mono"
-              />
+                onChange={e => {
+                  setPipelineCompetitorId(e.target.value)
+                  // Při výběru konkurenta předvyplň jeho URL jako listing URL
+                  const selected = competitors.find(c => c.id === e.target.value)
+                  if (selected && !pipelineListingUrl) {
+                    setPipelineListingUrl(selected.url)
+                  }
+                }}
+                className="w-full text-xs border border-gray-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white">
+                <option value="">— Vyber konkurenta —</option>
+                {competitors.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
-              <label className="text-xs text-gray-600 font-medium block mb-1">Listing URL (volitelné)</label>
+              <label className="text-xs text-gray-600 font-medium block mb-1">
+                Listing / kategorie URL
+                <span className="ml-1 text-gray-400 font-normal">(předvyplněno z homepage)</span>
+              </label>
               <input
                 value={pipelineListingUrl}
                 onChange={e => setPipelineListingUrl(e.target.value)}
@@ -242,7 +273,7 @@ function ConfirmedMatchesSection({ productId }: { productId: string }) {
             <div className="flex items-end">
               <button
                 onClick={handleRunPipeline}
-                disabled={pipelineRunning || !pipelineCompetitorId.trim()}
+                disabled={pipelineRunning || !pipelineCompetitorId}
                 className="w-full flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg transition">
                 {pipelineRunning
                   ? <><RefreshCw size={12} className="animate-spin" /> Spouštím…</>
