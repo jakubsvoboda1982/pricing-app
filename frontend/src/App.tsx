@@ -25,6 +25,7 @@ import CompetitorDetailPage from './pages/CompetitorDetailPage'
 import BaselinkerPage from './pages/BaselinkerPage'
 import RecommendationsPage from './pages/RecommendationsPage'
 import WatchlistPage from './pages/WatchlistPage'
+import MatchReviewPage from './pages/MatchReviewPage'
 import { useAuthStore } from './store/auth'
 
 const queryClient = new QueryClient()
@@ -64,6 +65,7 @@ function AppRoutes() {
         <Route path="/baselinker" element={<BaselinkerPage />} />
         <Route path="/recommendations" element={<RecommendationsPage />} />
         <Route path="/watchlist" element={<WatchlistPage />} />
+        <Route path="/matching" element={<MatchReviewPage />} />
         <Route
           path="/admin/login-attempts"
           element={

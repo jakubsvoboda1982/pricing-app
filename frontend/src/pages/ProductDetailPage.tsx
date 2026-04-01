@@ -5,8 +5,9 @@ import {
   ArrowLeft, ExternalLink, Plus, Trash2, Edit2, Save, X, Package,
   TrendingUp, Link2, ShoppingCart, Factory, RefreshCw, Clock,
   ChevronDown, ChevronUp, AlertCircle, CheckCircle, BarChart2,
+  Scale, Play, XCircle,
 } from 'lucide-react'
-import { API_BASE_URL } from '@/api/client'
+import { API_BASE_URL, apiClient } from '@/api/client'
 
 // ── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -40,6 +41,24 @@ interface CompetitorPriceRecord {
 }
 
 interface PriceHistoryEntry { price: number; recorded_at: string }
+
+interface ProductMatch {
+  id: string
+  competitor_id: string
+  competitor_name: string | null
+  candidate_id: string | null
+  candidate_name: string | null
+  candidate_url: string | null
+  candidate_price: number | null
+  candidate_weight_g: number | null
+  candidate_available: boolean | null
+  match_status: string
+  match_confidence_score: number | null
+  match_grade: string | null
+  scoring_breakdown: Record<string, unknown> | null
+  approved_at: string | null
+  last_price_check_at: string | null
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -93,6 +112,280 @@ function ScoreRow({ label, pts, max }: { label: string; pts: number; max: number
       <span className={`text-xs font-semibold w-9 text-right flex-shrink-0 ${pts >= max ? 'text-green-600' : pts > 0 ? 'text-yellow-600' : 'text-gray-300'}`}>
         {pts}/{max}
       </span>
+    </div>
+  )
+}
+
+// ── Confirmed Matches Section ──────────────────────────────────────────────
+
+function GradeBadge({ grade }: { grade: string | null }) {
+  if (!grade) return null
+  const styles: Record<string, string> = {
+    A: 'bg-green-100 text-green-800 border-green-200',
+    B: 'bg-blue-100 text-blue-800 border-blue-200',
+    C: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+    X: 'bg-red-100 text-red-800 border-red-200',
+  }
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold border ${styles[grade] ?? styles.X}`}>
+      {grade}
+    </span>
+  )
+}
+
+function ConfirmedMatchesSection({ productId }: { productId: string }) {
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const [showPipeline, setShowPipeline] = useState(false)
+  const [pipelineCompetitorId, setPipelineCompetitorId] = useState('')
+  const [pipelineListingUrl, setPipelineListingUrl] = useState('')
+  const [pipelineRunning, setPipelineRunning] = useState(false)
+  const [pipelineMsg, setPipelineMsg] = useState<string | null>(null)
+  const [expandedMatchId, setExpandedMatchId] = useState<string | null>(null)
+
+  // Fetch active (approved) matches for this product
+  const { data: activeMatches = [], isLoading, refetch } = useQuery<ProductMatch[]>({
+    queryKey: ['product-matches-active', productId],
+    queryFn: () => apiClient.getProductMatches(productId, 'active'),
+    enabled: !!productId,
+    refetchInterval: 30000,
+  })
+
+  // Fetch proposed (pending review) count
+  const { data: proposedMatches = [] } = useQuery<ProductMatch[]>({
+    queryKey: ['product-matches-proposed', productId],
+    queryFn: () => apiClient.getProductMatches(productId, 'proposed'),
+    enabled: !!productId,
+    refetchInterval: 30000,
+  })
+
+  const handleRunPipeline = async () => {
+    if (!pipelineCompetitorId.trim()) return
+    setPipelineRunning(true)
+    setPipelineMsg(null)
+    try {
+      const urls = pipelineListingUrl.trim() ? [pipelineListingUrl.trim()] : undefined
+      await apiClient.runMatchingPipeline(productId, pipelineCompetitorId.trim(), urls)
+      setPipelineMsg('Pipeline spuštěn na pozadí. Výsledky se objeví za chvíli.')
+      setTimeout(() => {
+        refetch()
+        qc.invalidateQueries({ queryKey: ['product-matches-proposed', productId] })
+      }, 5000)
+    } catch (e: any) {
+      setPipelineMsg(`Chyba: ${e?.message ?? 'neznámá chyba'}`)
+    } finally {
+      setPipelineRunning(false)
+    }
+  }
+
+  const handleDeactivate = async (matchId: string) => {
+    await apiClient.deactivateMatch(matchId)
+    refetch()
+  }
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Scale size={16} className="text-blue-600" />
+          <h2 className="text-sm font-semibold text-gray-800">Shody s konkurencí</h2>
+          {activeMatches.length > 0 && (
+            <span className="bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+              {activeMatches.length} aktivních
+            </span>
+          )}
+          {proposedMatches.length > 0 && (
+            <button
+              onClick={() => navigate('/matching')}
+              className="bg-yellow-100 text-yellow-700 text-xs font-semibold px-2 py-0.5 rounded-full hover:bg-yellow-200 transition">
+              {proposedMatches.length} čeká na review →
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/matching')}
+            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 transition">
+            <Scale size={12} /> Párovací centrum
+          </button>
+          <button
+            onClick={() => setShowPipeline(v => !v)}
+            className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-2.5 py-1.5 rounded-lg transition">
+            <Play size={12} /> Spustit pipeline
+          </button>
+        </div>
+      </div>
+
+      {/* Pipeline launcher */}
+      {showPipeline && (
+        <div className="px-5 py-3 bg-blue-50 border-b border-blue-100 space-y-3">
+          <p className="text-xs font-semibold text-blue-800">Spustit matching pipeline</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div>
+              <label className="text-xs text-gray-600 font-medium block mb-1">UUID Konkurenta *</label>
+              <input
+                value={pipelineCompetitorId}
+                onChange={e => setPipelineCompetitorId(e.target.value)}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="w-full text-xs border border-gray-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300 font-mono"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-600 font-medium block mb-1">Listing URL (volitelné)</label>
+              <input
+                value={pipelineListingUrl}
+                onChange={e => setPipelineListingUrl(e.target.value)}
+                placeholder="https://konkurent.cz/orechy"
+                className="w-full text-xs border border-gray-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                onClick={handleRunPipeline}
+                disabled={pipelineRunning || !pipelineCompetitorId.trim()}
+                className="w-full flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg transition">
+                {pipelineRunning
+                  ? <><RefreshCw size={12} className="animate-spin" /> Spouštím…</>
+                  : <><Play size={12} /> Spustit</>}
+              </button>
+            </div>
+          </div>
+          {pipelineMsg && (
+            <p className={`text-xs ${pipelineMsg.startsWith('Chyba') ? 'text-red-600' : 'text-green-700'}`}>
+              {pipelineMsg}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Active matches list */}
+      <div className="divide-y divide-gray-100">
+        {isLoading ? (
+          <div className="px-5 py-6 text-center text-gray-400 text-sm">
+            <RefreshCw size={16} className="inline animate-spin mr-1" /> Načítám…
+          </div>
+        ) : activeMatches.length === 0 ? (
+          <div className="px-5 py-6 text-center">
+            <Scale size={28} className="text-gray-200 mx-auto mb-2" />
+            <p className="text-sm text-gray-400">Žádné schválené shody</p>
+            <p className="text-xs text-gray-300 mt-1">
+              Spusťte pipeline nebo schvalte návrhy v Párovacím centru
+            </p>
+          </div>
+        ) : (
+          activeMatches.map(match => {
+            const isExpanded = expandedMatchId === match.id
+            const bd = match.scoring_breakdown as any
+            return (
+              <div key={match.id} className="px-5 py-3">
+                <div className="flex items-center gap-3">
+                  {/* Score pill */}
+                  {match.match_confidence_score != null && (
+                    <div className="flex-shrink-0 flex flex-col items-center w-12">
+                      <span className="text-base font-bold text-gray-800">
+                        {Math.round(match.match_confidence_score)}
+                      </span>
+                      <span className="text-xs text-gray-400">/ 100</span>
+                    </div>
+                  )}
+
+                  {/* Candidate info */}
+                  <div className="flex-1 min-w-0 space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-800 truncate max-w-xs">
+                        {match.candidate_name ?? '—'}
+                      </span>
+                      <GradeBadge grade={match.match_grade} />
+                      {match.match_status === 'manually_approved' && (
+                        <span className="text-xs text-green-700 bg-green-50 px-1.5 rounded border border-green-200">✓ Ručně</span>
+                      )}
+                      {match.match_status === 'auto_approved' && (
+                        <span className="text-xs text-blue-700 bg-blue-50 px-1.5 rounded border border-blue-200">⚡ Auto</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
+                      <span className="font-medium text-gray-600">{match.competitor_name ?? '—'}</span>
+                      {match.candidate_price != null && (
+                        <span className="font-semibold text-gray-800">
+                          {match.candidate_price.toLocaleString('cs-CZ', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} CZK
+                        </span>
+                      )}
+                      {match.candidate_weight_g != null && (
+                        <span>
+                          {match.candidate_weight_g >= 1000
+                            ? `${(match.candidate_weight_g / 1000).toFixed(match.candidate_weight_g % 1000 === 0 ? 0 : 1)} kg`
+                            : `${match.candidate_weight_g} g`}
+                        </span>
+                      )}
+                      {match.candidate_available === true && (
+                        <span className="text-green-700 bg-green-50 px-1.5 py-0.5 rounded">Skladem</span>
+                      )}
+                      {match.candidate_available === false && (
+                        <span className="text-red-700 bg-red-50 px-1.5 py-0.5 rounded">Vyprodáno</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {match.candidate_url && (
+                      <a href={match.candidate_url} target="_blank" rel="noopener noreferrer"
+                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
+                        <ExternalLink size={14} />
+                      </a>
+                    )}
+                    <button
+                      onClick={() => setExpandedMatchId(isExpanded ? null : match.id)}
+                      className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition">
+                      {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
+                    <button
+                      onClick={() => handleDeactivate(match.id)}
+                      title="Deaktivovat match"
+                      className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition">
+                      <XCircle size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Inline scoring breakdown */}
+                {isExpanded && bd && (
+                  <div className="mt-3 ml-15 bg-gray-50 rounded-lg p-3 space-y-1.5 border border-gray-100">
+                    <p className="text-xs font-semibold text-gray-500 mb-2">Scoring breakdown</p>
+                    {[
+                      { label: 'Zpracování', pts: bd.processing_match, max: 25 },
+                      { label: 'Chuť / charakter', pts: bd.flavor_match, max: 20 },
+                      { label: 'Gramáž', pts: bd.weight_match, max: 20 },
+                      { label: 'Podobnost názvu', pts: bd.title_similarity, max: 10 },
+                      { label: 'Brand', pts: bd.brand_relevance, max: 5 },
+                      { label: 'Balení', pts: bd.packaging_similarity, max: 5 },
+                      { label: 'Strukturovaná data', pts: bd.structured_data_bonus, max: 5 },
+                      { label: 'Cena za kg', pts: bd.unit_price_bonus, max: 5 },
+                    ].map(row => (
+                      <ScoreRow key={row.label} label={row.label} pts={row.pts ?? 0} max={row.max} />
+                    ))}
+                    {(bd.penalties ?? 0) < 0 && (
+                      <ScoreRow label="Penalizace" pts={bd.penalties} max={0} />
+                    )}
+                    {bd.reasons && bd.reasons.length > 0 && (
+                      <div className="pt-2 border-t border-gray-200">
+                        <p className="text-xs text-gray-500 font-medium mb-1">Důvody:</p>
+                        <ul className="space-y-0.5">
+                          {(bd.reasons as string[]).map((r: string, i: number) => (
+                            <li key={i} className="text-xs text-gray-600 flex items-start gap-1">
+                              <span className="text-gray-300 flex-shrink-0">·</span> {r}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })
+        )}
+      </div>
     </div>
   )
 }
@@ -1026,6 +1319,9 @@ export default function ProductDetailPage() {
           </div>
         )}
       </div>
+
+      {/* ── CONFIRMED MATCHES (Schválené shody s konkurencí) ──────────── */}
+      <ConfirmedMatchesSection productId={id!} />
 
     </div>
   )

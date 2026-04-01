@@ -411,6 +411,75 @@ export class APIClient {
   async getAnnualCalendar() {
     return this.request('GET', '/seasonality/calendar/annual')
   }
+
+  // Matching
+  async getMatches(params?: {
+    product_id?: string
+    competitor_id?: string
+    status?: string
+    grade?: string
+    is_active?: boolean
+    skip?: number
+    limit?: number
+  }) {
+    const p = new URLSearchParams()
+    if (params?.product_id) p.set('product_id', params.product_id)
+    if (params?.competitor_id) p.set('competitor_id', params.competitor_id)
+    if (params?.status) p.set('status', params.status)
+    if (params?.grade) p.set('grade', params.grade)
+    if (params?.is_active !== undefined) p.set('is_active', String(params.is_active))
+    if (params?.skip !== undefined) p.set('skip', String(params.skip))
+    if (params?.limit !== undefined) p.set('limit', String(params.limit))
+    const qs = p.toString()
+    return this.request('GET', `/matching/matches${qs ? `?${qs}` : ''}`)
+  }
+
+  async getProductMatches(productId: string, status?: string) {
+    const p = new URLSearchParams()
+    if (status) p.set('status', status)
+    const qs = p.toString()
+    return this.request('GET', `/matching/product/${productId}/matches${qs ? `?${qs}` : ''}`)
+  }
+
+  async approveMatch(matchId: string, notes?: string) {
+    return this.request('POST', `/matching/matches/${matchId}/approve`, { notes })
+  }
+
+  async rejectMatch(matchId: string, reason: string, notes?: string) {
+    return this.request('POST', `/matching/matches/${matchId}/reject`, { reason, notes })
+  }
+
+  async deactivateMatch(matchId: string) {
+    return this.request('POST', `/matching/matches/${matchId}/deactivate`)
+  }
+
+  async getMatchStats(params?: { product_id?: string; competitor_id?: string }) {
+    const p = new URLSearchParams()
+    if (params?.product_id) p.set('product_id', params.product_id)
+    if (params?.competitor_id) p.set('competitor_id', params.competitor_id)
+    const qs = p.toString()
+    return this.request('GET', `/matching/stats${qs ? `?${qs}` : ''}`)
+  }
+
+  async runDiscovery(competitorId: string, listingUrl: string, maxCandidates = 50) {
+    return this.request('POST', '/matching/run-discovery', {
+      competitor_id: competitorId,
+      listing_url: listingUrl,
+      max_candidates: maxCandidates,
+    })
+  }
+
+  async runMatchingPipeline(productId: string, competitorId: string, listingUrls?: string[]) {
+    return this.request('POST', '/matching/run-pipeline', {
+      product_id: productId,
+      competitor_id: competitorId,
+      listing_urls: listingUrls,
+    })
+  }
+
+  async rescoreMatches(productId: string, competitorId: string) {
+    return this.request('POST', `/matching/rescore/${productId}/${competitorId}`)
+  }
 }
 
 export const apiClient = new APIClient()
