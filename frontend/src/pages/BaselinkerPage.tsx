@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import {
   Link2, CheckCircle, AlertCircle, RefreshCw, Package,
-  ChevronDown, Search, X, Link, Unlink, ChevronRight,
+  ChevronDown, Search, X, Link, Unlink, ChevronRight, ExternalLink,
 } from 'lucide-react'
 import { apiClient } from '@/api/client'
 
@@ -45,6 +46,7 @@ interface OurProduct {
 
 export default function BaselinkerPage() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
 
   // Config tab state
   const [token, setToken] = useState('')
@@ -531,15 +533,20 @@ export default function BaselinkerPage() {
                         </td>
                         <td className="px-4 py-3">
                           {p.matched_product ? (
-                            <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => navigate(`/products/${p.matched_product!.id}`)}
+                              className="flex items-center gap-1.5 group text-left"
+                              title="Otevřít sledovaný produkt"
+                            >
                               <Link size={12} className="text-green-500 shrink-0" />
-                              <span className="text-green-800 text-xs font-medium truncate max-w-[160px]" title={p.matched_product.name}>
+                              <span className="text-green-800 text-xs font-medium truncate max-w-[160px] group-hover:underline" title={p.matched_product.name}>
                                 {p.matched_product.name}
                               </span>
                               {p.matched_product.sku && (
                                 <span className="text-gray-400 text-xs">({p.matched_product.sku})</span>
                               )}
-                            </div>
+                              <ExternalLink size={10} className="text-gray-300 group-hover:text-green-500 shrink-0 transition" />
+                            </button>
                           ) : (
                             <span className="text-gray-300 text-xs">Nespárováno</span>
                           )}
