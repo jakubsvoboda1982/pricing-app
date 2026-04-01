@@ -48,25 +48,58 @@ async def sync_baselinker_stock_scheduled():
                 continue
 
             try:
+                from app.models import BaselinkerProductMatch
                 client = BaselinkerClient(config.api_token)
                 bl_products = await client.get_all_products(config.inventory_id)
 
-                # Vytvoř mapu SKU → stock
-                sku_to_stock = {}
+                # Vytvoř mapy: bl_id → stock, sku → stock, ean → stock
+                bl_id_to_stock: dict = {}
+                sku_to_stock: dict = {}
+                ean_to_stock: dict = {}
                 for p in bl_products:
-                    sku = p.get("sku") or p.get("name", "")
+                    bl_id = str(p.get("baselinker_id", ""))
+                    sku = (p.get("sku") or "").strip()
+                    ean = (p.get("ean") or "").strip()
                     stock = p.get("stock", {})
-                    total_stock = sum(v for v in stock.values() if isinstance(v, (int, float)))
+                    total_stock = int(sum(v for v in stock.values() if isinstance(v, (int, float))))
+                    if bl_id:
+                        bl_id_to_stock[bl_id] = total_stock
                     if sku:
-                        sku_to_stock[sku.strip()] = int(total_stock)
+                        sku_to_stock[sku] = total_stock
+                    if ean:
+                        ean_to_stock[ean] = total_stock
 
-                # Aktualizuj produkty
-                products = db.query(Product).filter(Product.company_id == config.company_id).all()
                 synced = 0
-                for product in products:
-                    key = product.product_code or product.sku
-                    if key and key in sku_to_stock:
-                        product.stock_quantity = sku_to_stock[key]
+                synced_product_ids: set = set()
+
+                # 1) Přímé propojení přes BaselinkerProductMatch (ruční párování)
+                matches = db.query(BaselinkerProductMatch).filter(
+                    BaselinkerProductMatch.company_id == config.company_id,
+                    BaselinkerProductMatch.product_id.isnot(None),
+                ).all()
+                for match in matches:
+                    bl_id = str(match.bl_product_id)
+                    if bl_id in bl_id_to_stock and match.product_id:
+                        product = db.query(Product).filter(Product.id == match.product_id).first()
+                        if product:
+                            product.stock_quantity = bl_id_to_stock[bl_id]
+                            synced += 1
+                            synced_product_ids.add(str(match.product_id))
+
+                # 2) Záložní párování přes EAN / SKU / product_code
+                all_products = db.query(Product).filter(Product.company_id == config.company_id).all()
+                for product in all_products:
+                    if str(product.id) in synced_product_ids:
+                        continue  # už spárováno přes match
+                    stock = None
+                    if product.ean and product.ean.strip() in ean_to_stock:
+                        stock = ean_to_stock[product.ean.strip()]
+                    elif product.product_code and product.product_code.strip() in sku_to_stock:
+                        stock = sku_to_stock[product.product_code.strip()]
+                    elif product.sku and product.sku.strip() in sku_to_stock:
+                        stock = sku_to_stock[product.sku.strip()]
+                    if stock is not None:
+                        product.stock_quantity = stock
                         synced += 1
 
                 from datetime import datetime, timezone

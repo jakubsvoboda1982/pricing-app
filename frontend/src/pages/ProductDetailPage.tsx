@@ -22,6 +22,9 @@ interface Product {
   manufacturing_cost_with_vat?: number | null; min_price?: number | null
   margin?: number | null; hero_score?: number | null
   lowest_competitor_price?: number | null; stock_quantity?: number | null
+  manufacturer?: string | null
+  catalog_price_vat?: number | null
+  catalog_quantity_in_stock?: number | null
   created_at: string
 }
 
@@ -363,6 +366,9 @@ export default function ProductDetailPage() {
             {product.ean && (
               <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">EAN: {product.ean}</span>
             )}
+            {product.manufacturer && (
+              <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded font-medium">🏭 {product.manufacturer}</span>
+            )}
             {product.category && (
               <span className="text-xs text-gray-400">· {product.category}</span>
             )}
@@ -391,8 +397,17 @@ export default function ProductDetailPage() {
                 </p>
               )}
             </>
+          ) : product.catalog_price_vat != null ? (
+            <>
+              <p className="text-2xl font-bold text-gray-700 leading-none">{Number(product.catalog_price_vat).toLocaleString('cs-CZ')}</p>
+              <p className="text-sm text-gray-400 mt-0.5">CZK</p>
+              <p className="text-xs text-indigo-500 mt-1">z katalogu</p>
+            </>
           ) : (
             <p className="text-sm text-gray-400 mt-1">Nenastaveno</p>
+          )}
+          {product.catalog_price_vat != null && currentPrice != null && (
+            <p className="text-xs text-gray-400 mt-1">Katalog: {Number(product.catalog_price_vat).toLocaleString('cs-CZ')} CZK</p>
           )}
           <button
             onClick={() => { setShowPriceForm(!showPriceForm); setShowPricingForm(null) }}
@@ -446,10 +461,22 @@ export default function ProductDetailPage() {
                 product.stock_quantity > 10 ? 'text-green-700'
                 : product.stock_quantity > 0 ? 'text-yellow-600' : 'text-red-600'
               }`}>{product.stock_quantity}</p>
-              <p className="text-sm text-gray-400 mt-0.5">ks</p>
+              <p className="text-sm text-gray-400 mt-0.5">ks · Baselinker</p>
               <p className="text-xs text-gray-400 mt-1">
                 {product.stock_quantity > 10 ? 'Dostatek' : product.stock_quantity > 0 ? 'Docházející' : 'Vyprodáno'}
               </p>
+              {product.catalog_quantity_in_stock != null && (
+                <p className="text-xs text-gray-400 mt-1">Katalog: {product.catalog_quantity_in_stock} ks</p>
+              )}
+            </>
+          ) : product.catalog_quantity_in_stock != null ? (
+            <>
+              <p className={`text-2xl font-bold leading-none ${
+                product.catalog_quantity_in_stock > 10 ? 'text-green-700'
+                : product.catalog_quantity_in_stock > 0 ? 'text-yellow-600' : 'text-red-600'
+              }`}>{product.catalog_quantity_in_stock}</p>
+              <p className="text-sm text-gray-400 mt-0.5">ks · katalog</p>
+              <p className="text-xs text-indigo-500 mt-1">z XML feedu</p>
             </>
           ) : (
             <p className="text-sm text-gray-400 mt-1">Nepropojeno</p>

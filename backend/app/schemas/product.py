@@ -89,6 +89,10 @@ class ProductResponse(BaseModel):
     lowest_competitor_price: Optional[Decimal] = None  # Minimální cena od konkurence (s DPH)
     competitor_products: Optional[List[CompetitorProductPriceResponse]] = None  # Ceny od jednotlivých konkurentů
     stock_quantity: Optional[int] = None  # Skladovost z Baselinker
+    # Katalogová data (z XML feedu / CatalogProduct)
+    manufacturer: Optional[str] = None
+    catalog_price_vat: Optional[Decimal] = None   # Katalogová cena s DPH (price_without_vat * (1 + vat_rate/100))
+    catalog_quantity_in_stock: Optional[int] = None  # Sklad z katalogu (XML feedu)
     created_at: datetime
     updated_at: Optional[datetime] = None
 

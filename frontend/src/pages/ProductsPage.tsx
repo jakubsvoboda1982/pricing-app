@@ -14,7 +14,9 @@ interface Product {
   old_price?: number | null; market?: string; purchase_price_without_vat?: number | null
   purchase_vat_rate?: number | null; purchase_price_with_vat?: number | null
   min_price?: number | null; margin?: number | null; hero_score?: number | null
-  lowest_competitor_price?: number | null; stock_quantity?: number | null; created_at: string
+  lowest_competitor_price?: number | null; stock_quantity?: number | null
+  manufacturer?: string | null; catalog_price_vat?: number | null
+  catalog_quantity_in_stock?: number | null; created_at: string
 }
 
 export default function ProductsPage() {
@@ -163,10 +165,11 @@ export default function ProductsPage() {
               <input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded border-gray-300" />
             </div>
             <div className="flex-1">Produkt</div>
-            <div className="w-32 text-right">Cena</div>
-            <div className="w-36 text-right">Konkurence</div>
+            <div className="w-28 text-right">Cena</div>
+            <div className="w-24 text-right">Skladem</div>
+            <div className="w-32 text-right">Konkurence</div>
             <div className="w-24 text-right">Marže</div>
-            <div className="w-32 text-right">Hero</div>
+            <div className="w-28 text-right">Hero</div>
             <div className="w-20 text-right">Akce</div>
           </div>
 
@@ -208,13 +211,7 @@ export default function ProductsPage() {
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                           {product.product_code && <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-mono">#{product.product_code}</span>}
-                          {product.stock_quantity != null && (
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                              product.stock_quantity > 10 ? 'bg-green-50 text-green-700'
-                              : product.stock_quantity > 0 ? 'bg-yellow-50 text-yellow-700'
-                              : 'bg-red-50 text-red-700'
-                            }`}>📦 {product.stock_quantity} ks</span>
-                          )}
+                          {product.manufacturer && <span className="text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">{product.manufacturer}</span>}
                           {product.market && (
                             <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${product.market === 'CZ' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
                               {product.market === 'CZ' ? '🇨🇿' : '🇸🇰'}
@@ -225,7 +222,7 @@ export default function ProductsPage() {
                     </div>
 
                     {/* Price */}
-                    <div className="w-32 text-right flex-shrink-0">
+                    <div className="w-28 text-right flex-shrink-0">
                       {cp != null ? (
                         <div>
                           <span className="text-sm font-semibold text-gray-900">{cp.toLocaleString('cs-CZ')} CZK</span>
@@ -233,9 +230,31 @@ export default function ProductsPage() {
                             <p className="text-xs text-gray-400 line-through">{Number(product.old_price).toLocaleString('cs-CZ')}</p>
                           )}
                         </div>
+                      ) : product.catalog_price_vat != null ? (
+                        <div>
+                          <span className="text-sm font-medium text-gray-500">{Number(product.catalog_price_vat).toLocaleString('cs-CZ')} CZK</span>
+                          <p className="text-xs text-indigo-400">katalog</p>
+                        </div>
                       ) : (
-                        <span className="text-xs text-gray-300 bg-gray-50 px-2 py-0.5 rounded">Nenastaveno</span>
+                        <span className="text-xs text-gray-300 bg-gray-50 px-2 py-0.5 rounded">—</span>
                       )}
+                    </div>
+
+                    {/* Skladem */}
+                    <div className="w-24 text-right flex-shrink-0">
+                      {(() => {
+                        const qty = product.stock_quantity ?? product.catalog_quantity_in_stock
+                        const fromBl = product.stock_quantity != null
+                        if (qty == null) return <span className="text-xs text-gray-300">—</span>
+                        return (
+                          <div>
+                            <span className={`text-sm font-semibold ${qty > 10 ? 'text-green-700' : qty > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
+                              {qty} ks
+                            </span>
+                            {!fromBl && <p className="text-xs text-gray-400">katalog</p>}
+                          </div>
+                        )
+                      })()}
                     </div>
 
                     {/* Competitors */}
@@ -265,7 +284,7 @@ export default function ProductsPage() {
                     </div>
 
                     {/* Hero */}
-                    <div className="w-32 text-right flex-shrink-0">
+                    <div className="w-28 text-right flex-shrink-0">
                       {product.hero_score != null ? (
                         <div className="flex items-center justify-end gap-1.5">
                           <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">

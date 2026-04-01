@@ -170,6 +170,27 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
 
     hero_score = _compute_hero_score(current_price, cost_with_vat, min_price, competitor_urls)
 
+    # Katalogová data (manufacturer, catalog cena, katalog sklad)
+    manufacturer = None
+    catalog_price_vat = None
+    catalog_quantity_in_stock = None
+    if product.catalog_product_id:
+        try:
+            cat = db.query(CatalogProduct).filter(
+                CatalogProduct.id == product.catalog_product_id
+            ).first()
+            if cat:
+                manufacturer = cat.manufacturer
+                catalog_quantity_in_stock = cat.quantity_in_stock
+                if cat.price_without_vat is not None and cat.vat_rate is not None:
+                    catalog_price_vat = round(
+                        cat.price_without_vat * (1 + cat.vat_rate / Decimal('100')), 2
+                    )
+                elif cat.price_without_vat is not None:
+                    catalog_price_vat = cat.price_without_vat
+        except Exception:
+            pass
+
     return {
         'id': product.id,
         'name': product.name,
@@ -196,6 +217,9 @@ def _enrich_with_price(product: Product, db: Session) -> dict:
         'lowest_competitor_price': lowest_competitor_price,
         'competitor_products': competitor_products,
         'stock_quantity': getattr(product, 'stock_quantity', None),
+        'manufacturer': manufacturer,
+        'catalog_price_vat': catalog_price_vat,
+        'catalog_quantity_in_stock': catalog_quantity_in_stock,
         'created_at': product.created_at,
         'updated_at': product.updated_at,
     }
@@ -226,6 +250,9 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
                 extra_data['category'] = product.category or cat_product.category
                 extra_data['description'] = product.description or cat_product.description
                 extra_data['product_code'] = cat_product.product_code
+                extra_data['_catalog_price_without_vat'] = cat_product.price_without_vat
+                extra_data['_catalog_vat_rate'] = cat_product.vat_rate
+                extra_data['_catalog_market'] = cat_product.market or 'CZ'
         except Exception:
             pass
 
@@ -250,6 +277,25 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
         competitor_urls=[]
     )
     db.add(db_product)
+    db.flush()  # get db_product.id before commit
+
+    # Vytvoř počáteční cenový záznam z katalogové ceny (pokud existuje)
+    cat_price_raw = extra_data.get('_catalog_price_without_vat')
+    cat_vat = extra_data.get('_catalog_vat_rate')
+    if cat_price_raw is not None and cat_price_raw > 0:
+        try:
+            vat = Decimal(str(cat_vat)) if cat_vat is not None else Decimal('0')
+            price_vat = Decimal(str(cat_price_raw)) * (1 + vat / Decimal('100'))
+            initial_price = Price(
+                product_id=db_product.id,
+                market=extra_data.get('_catalog_market', 'CZ'),
+                currency='CZK',
+                current_price=round(price_vat, 2),
+            )
+            db.add(initial_price)
+        except Exception:
+            pass
+
     db.commit()
     db.refresh(db_product)
     return ProductResponse(**_enrich_with_price(db_product, db))
