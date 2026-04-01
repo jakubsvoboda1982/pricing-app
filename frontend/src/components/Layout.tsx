@@ -35,8 +35,10 @@ export default function Layout() {
       section: 'ANALÝZA',
       items: [
         { id: 'competitors', label: 'Konkurence', icon: BarChart3, path: '/competitors' },
+        { id: 'recommendations', label: 'Doporučení cen', icon: AlertCircle, path: '/recommendations' },
         { id: 'simulator', label: 'Simulátor co-když', icon: Zap, path: '/simulator' },
         { id: 'seasonality', label: 'Sezónní engine', icon: Calendar, path: '/seasonality' },
+        { id: 'watchlist', label: 'Sledované produkty', icon: Package, path: '/watchlist' },
       ]
     },
     {

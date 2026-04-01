@@ -310,6 +310,85 @@ export class APIClient {
   async saveBaselinkerInventory(inventory_id: number | null) {
     return this.request('POST', '/baselinker/save-inventory', { inventory_id })
   }
+
+  // Recommendations
+  async generateRecommendation(productId: string) {
+    return this.request('POST', `/recommendations/generate/${productId}`)
+  }
+
+  async getRecommendation(recommendationId: string) {
+    return this.request('GET', `/recommendations/${recommendationId}`)
+  }
+
+  async listRecommendations(status?: string) {
+    const qs = status ? `?status=${status}` : ''
+    return this.request('GET', `/recommendations${qs}`)
+  }
+
+  async approveRecommendation(recommendationId: string, data?: any) {
+    return this.request('POST', `/recommendations/${recommendationId}/approve`, data || {})
+  }
+
+  async rejectRecommendation(recommendationId: string) {
+    return this.request('POST', `/recommendations/${recommendationId}/reject`)
+  }
+
+  async applyRecommendation(recommendationId: string) {
+    return this.request('POST', `/recommendations/${recommendationId}/apply`)
+  }
+
+  // Hero Products
+  async calculateHeroScore(data: any) {
+    return this.request('POST', '/hero/calculate', data)
+  }
+
+  async listHeroProducts() {
+    return this.request('GET', '/hero/products')
+  }
+
+  async getHeroScore(productId: string) {
+    return this.request('GET', `/hero/${productId}`)
+  }
+
+  // Seasonality
+  async createSeasonalityRule(data: any) {
+    return this.request('POST', '/seasonality/rules', data)
+  }
+
+  async listSeasonalityRules(category?: string) {
+    const qs = category ? `?category=${category}` : ''
+    return this.request('GET', `/seasonality/rules${qs}`)
+  }
+
+  async getSeasonalityCalendar(category?: string) {
+    const qs = category ? `?category=${category}` : ''
+    return this.request('GET', `/seasonality/calendar${qs}`)
+  }
+
+  async deleteSeasonalityRule(ruleId: string) {
+    return this.request('DELETE', `/seasonality/rules/${ruleId}`)
+  }
+
+  // Watchlist
+  async addToWatchlist(productId: string) {
+    return this.request('POST', `/watchlist/add/${productId}`)
+  }
+
+  async removeFromWatchlist(productId: string) {
+    return this.request('DELETE', `/watchlist/remove/${productId}`)
+  }
+
+  async listWatchlist() {
+    return this.request('GET', '/watchlist')
+  }
+
+  async togglePriceAlert(watchedId: string) {
+    return this.request('POST', `/watchlist/${watchedId}/toggle-price-alert`)
+  }
+
+  async toggleStockAlert(watchedId: string) {
+    return this.request('POST', `/watchlist/${watchedId}/toggle-stock-alert`)
+  }
 }
 
 export const apiClient = new APIClient()
