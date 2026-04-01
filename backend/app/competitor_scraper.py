@@ -5,10 +5,11 @@ Handles extraction of price data from common competitor URLs.
 
 import asyncio
 import aiohttp
+import json
+import re
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional
-import re
 from sqlalchemy.orm import Session
 from app.models import CompetitorProductPrice, CompetitorPriceHistory
 from app.database import SessionLocal
@@ -16,70 +17,145 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# User agent to avoid being blocked
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+# User agent — emuluje Chrome na Windows
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
 
-# Patterns for common Czech/Slovak e-commerce sites
-PRICE_PATTERNS = {
-    # Heureka format: data-price="299"
-    'heureka': re.compile(r'data-price=["\']([0-9.]+)["\']', re.IGNORECASE),
-    # Zbozi.cz format: class="price"
-    'zbozi': re.compile(r'<span[^>]*class="[^"]*price[^"]*"[^>]*>([0-9.,\s]+)</span>', re.IGNORECASE),
-    # Generic price patterns: <span>299 Kč</span>
-    'generic': re.compile(r'([0-9]{1,5}[.,]?[0-9]{0,2})\s*(?:Kč|CZK|€|EUR)', re.IGNORECASE),
-    # Price in JSON: "price":299
-    'json_price': re.compile(r'["\']?price["\']?\s*:\s*([0-9.]+)', re.IGNORECASE),
-}
+# ── Regexové zálohy ───────────────────────────────────────────────────────────
+# Pořadí: specifické → obecné
+PRICE_PATTERNS = [
+    # data-price="299"  /  data-price='299'
+    re.compile(r'data-price=["\']([0-9 ]+(?:[.,][0-9]{1,2})?)["\']', re.IGNORECASE),
+    # <meta property="product:price:amount" content="299"/>
+    re.compile(r'property=["\']product:price:amount["\'][^>]*content=["\']([0-9 ]+(?:[.,][0-9]{1,2})?)["\']', re.IGNORECASE),
+    re.compile(r'content=["\']([0-9 ]+(?:[.,][0-9]{1,2})?)["\'][^>]*property=["\']product:price:amount["\']', re.IGNORECASE),
+    # <meta itemprop="price" content="299">
+    re.compile(r'itemprop=["\']price["\'][^>]*content=["\']([0-9 ]+(?:[.,][0-9]{1,2})?)["\']', re.IGNORECASE),
+    re.compile(r'content=["\']([0-9 ]+(?:[.,][0-9]{1,2})?)["\'][^>]*itemprop=["\']price["\']', re.IGNORECASE),
+    # <span class="price">299</span>  – různé varianty class
+    re.compile(r'<[^>]+class="[^"]*(?:product-?price|price-?final|price-?current|cena)[^"]*"[^>]*>\s*(?:<[^>]+>)*([0-9 ]+(?:[.,][0-9]{1,2})?)\s*(?:Kč|CZK|€|EUR)?', re.IGNORECASE),
+    # Obecný vzor: číslo + CZK/Kč v těsné blízkosti
+    re.compile(r'\b([1-9][0-9]{0,5}(?:[.,][0-9]{1,2})?)\s*(?:Kč|CZK)\b', re.IGNORECASE),
+]
 
 
-async def fetch_page_content(url: str, timeout: int = 10) -> Optional[str]:
+async def fetch_page_content(url: str, timeout: int = 15) -> Optional[str]:
     """
-    Fetch page content from a URL.
-    Returns HTML content or None if fetch failed.
+    Stáhni stránku konkurenta. Posílá hlavičky reálného prohlížeče.
     """
+    headers = {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'cs-CZ,cs;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Cache-Control': 'max-age=0',
+    }
     try:
-        async with aiohttp.ClientSession() as session:
-            headers = {'User-Agent': USER_AGENT}
-            async with session.get(url, headers=headers, timeout=timeout, ssl=False) as response:
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(
+                url, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=timeout),
+                allow_redirects=True,
+                max_redirects=5,
+            ) as response:
                 if response.status == 200:
-                    return await response.text()
+                    # Zkus detekovat encoding ze Content-Type
+                    ct = response.headers.get('Content-Type', '')
+                    enc = 'utf-8'
+                    if 'charset=' in ct:
+                        enc = ct.split('charset=')[-1].split(';')[0].strip() or 'utf-8'
+                    return await response.text(encoding=enc, errors='replace')
                 else:
-                    logger.warning(f"Failed to fetch {url}: status {response.status}")
+                    logger.warning(f"HTTP {response.status} při načítání {url}")
                     return None
     except asyncio.TimeoutError:
-        logger.warning(f"Timeout fetching {url}")
+        logger.warning(f"Timeout: {url}")
         return None
     except Exception as e:
-        logger.error(f"Error fetching {url}: {str(e)}")
+        logger.error(f"Chyba při načítání {url}: {e}")
         return None
+
+
+def _clean_price(raw: str) -> Optional[Decimal]:
+    """Očisti řetězec ceny a převeď na Decimal. Vrátí None při chybě."""
+    try:
+        cleaned = raw.replace('\xa0', '').replace(' ', '').replace(',', '.')
+        # Odstraň přebytečné desetinné tečky (jen první nech)
+        parts = cleaned.split('.')
+        if len(parts) > 2:
+            cleaned = parts[0] + '.' + ''.join(parts[1:])
+        val = Decimal(cleaned)
+        # Sanity check: 1 Kč – 99 999 Kč
+        if Decimal('1') <= val <= Decimal('99999'):
+            return val
+    except Exception:
+        pass
+    return None
+
+
+def _extract_from_json_ld(html: str) -> Optional[Decimal]:
+    """Hledej JSON-LD blok <script type="application/ld+json"> s Product/offers."""
+    for block in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                             html, re.DOTALL | re.IGNORECASE):
+        try:
+            data = json.loads(block)
+            # Může být list nebo dict
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                # Flatten @graph
+                if '@graph' in item:
+                    items.extend(item['@graph'])
+                t = item.get('@type', '')
+                if isinstance(t, list):
+                    t = ' '.join(t)
+                if 'product' not in t.lower() and 'offer' not in t.lower():
+                    continue
+                # Najdi offers
+                offers = item.get('offers', item)
+                if isinstance(offers, list):
+                    offers = offers[0]
+                price_raw = offers.get('price') or offers.get('lowPrice')
+                if price_raw is not None:
+                    val = _clean_price(str(price_raw))
+                    if val:
+                        return val
+        except Exception:
+            pass
+    return None
 
 
 def extract_price(html: str, url: str) -> Optional[Decimal]:
     """
-    Extract price from HTML content.
-    Tries multiple patterns and returns the first match found.
+    Extrahuj cenu z HTML.
+    1) JSON-LD structured data (nejspolehlivější)
+    2) Meta tagy a data-atributy
+    3) Obecné regex vzory
     """
     if not html:
         return None
 
-    # Try site-specific patterns
-    for site, pattern in PRICE_PATTERNS.items():
-        matches = pattern.findall(html)
-        if matches:
-            # Get the first (likely the product price, not shipping, etc.)
-            price_str = matches[0]
-            try:
-                # Clean up the price string
-                price_str = price_str.replace(',', '.').replace(' ', '').strip()
-                # Try to convert to Decimal
-                price = Decimal(price_str)
-                if price > 0:
-                    logger.info(f"Extracted price from {url} using {site} pattern: {price}")
-                    return price
-            except:
-                pass
+    # 1. JSON-LD
+    price = _extract_from_json_ld(html)
+    if price:
+        logger.info(f"[JSON-LD] {url} → {price}")
+        return price
 
-    logger.warning(f"No price found in {url}")
+    # 2+3. Regex vzory
+    for pattern in PRICE_PATTERNS:
+        matches = pattern.findall(html)
+        for raw in matches:
+            val = _clean_price(raw)
+            if val:
+                logger.info(f"[regex] {url} → {val}")
+                return val
+
+    logger.warning(f"Cena nenalezena: {url}")
     return None
 
 

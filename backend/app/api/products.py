@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel
 from typing import Optional
 from decimal import Decimal
+from datetime import datetime, timedelta
 import re
 
 router = APIRouter(prefix="/api/products", tags=["products"])
@@ -351,7 +352,10 @@ def set_product_price(product_id: UUID, price_data: PriceCreate, db: Session = D
 
 
 @router.post("/{product_id}/competitor-urls")
-def add_competitor_url(product_id: UUID, payload: CompetitorUrlAdd, db: Session = Depends(get_db)):
+async def add_competitor_url(product_id: UUID, payload: CompetitorUrlAdd, db: Session = Depends(get_db)):
+    from app.models import CompetitorProductPrice, CompetitorPriceHistory
+    from app.competitor_scraper import scrape_competitor_price
+
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
@@ -362,9 +366,44 @@ def add_competitor_url(product_id: UUID, payload: CompetitorUrlAdd, db: Session 
 
     name = payload.name or _get_domain_name(payload.url)
     urls.append({"url": payload.url, "name": name, "market": payload.market})
-
     product.competitor_urls = urls
     db.commit()
+
+    # Vytvoř CompetitorProductPrice tracking record (pokud ještě neexistuje)
+    existing_track = db.query(CompetitorProductPrice).filter(
+        CompetitorProductPrice.product_id == product_id,
+        CompetitorProductPrice.competitor_url == payload.url,
+    ).first()
+    if not existing_track:
+        track = CompetitorProductPrice(
+            product_id=product_id,
+            competitor_url=payload.url,
+            currency="CZK" if payload.market == "CZ" else "EUR",
+            market=payload.market,
+            fetch_status="pending",
+        )
+        db.add(track)
+        db.commit()
+        db.refresh(track)
+
+        # Ihned načti cenu na pozadí
+        try:
+            price = await scrape_competitor_price(payload.url)
+            if price is not None:
+                track.price = price
+                track.last_fetched_at = datetime.utcnow()
+                track.fetch_status = "success"
+                track.next_update_at = datetime.utcnow() + timedelta(days=7)
+            else:
+                track.fetch_status = "error"
+                track.fetch_error = "Cena nenalezena na stránce"
+                track.last_fetched_at = datetime.utcnow()
+            db.commit()
+        except Exception as e:
+            track.fetch_status = "error"
+            track.fetch_error = str(e)
+            db.commit()
+
     db.refresh(product)
     return ProductResponse(**_enrich_with_price(product, db))
 

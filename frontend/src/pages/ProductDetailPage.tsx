@@ -237,7 +237,10 @@ export default function ProductDetailPage() {
       })
       if (!res.ok) throw new Error('Chyba')
       queryClient.invalidateQueries({ queryKey: ['product', id] })
+      queryClient.invalidateQueries({ queryKey: ['competitor-prices', id] })
       setNewUrl(''); setShowAddUrl(false)
+      // Počkej chvíli a znovu načti ceny (backend je zpracovává async)
+      setTimeout(() => refetchCompetitorPrices(), 2000)
     } catch { /* ignore */ } finally { setAddingUrl(false) }
   }
 

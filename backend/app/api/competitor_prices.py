@@ -126,10 +126,31 @@ async def refresh_competitor_prices(
 ):
     """
     Manually trigger a refresh of all competitor prices for this product.
+    Also ensures CompetitorProductPrice records exist for all competitor_urls.
     """
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
+
+    # Sync: vytvoř tracking záznamy pro všechny competitor_urls, které ještě nemají
+    for url_item in (product.competitor_urls or []):
+        url = url_item.get('url') if isinstance(url_item, dict) else url_item
+        if not url:
+            continue
+        existing = db.query(CompetitorProductPrice).filter(
+            CompetitorProductPrice.product_id == product_id,
+            CompetitorProductPrice.competitor_url == url,
+        ).first()
+        if not existing:
+            market = url_item.get('market', 'CZ') if isinstance(url_item, dict) else 'CZ'
+            db.add(CompetitorProductPrice(
+                product_id=product_id,
+                competitor_url=url,
+                currency="CZK" if market == "CZ" else "EUR",
+                market=market,
+                fetch_status="pending",
+            ))
+    db.commit()
 
     comp_prices = db.query(CompetitorProductPrice).filter(
         CompetitorProductPrice.product_id == product_id
