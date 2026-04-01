@@ -19,6 +19,10 @@ class BaselinkerConfigIn(BaseModel):
     inventory_id: Optional[int] = None
 
 
+class InventorySelect(BaseModel):
+    inventory_id: int
+
+
 class BaselinkerConfigOut(BaseModel):
     api_token_masked: str
     inventory_id: Optional[int]
@@ -98,8 +102,8 @@ async def save_config(data: BaselinkerConfigIn, payload: dict = Depends(verify_t
 
 
 @router.post("/save-inventory", response_model=dict)
-async def save_inventory(data: BaselinkerConfigIn, payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
-    """Uloží vybraný katalog (inventory_id) do konfigurace."""
+async def save_inventory(data: InventorySelect, payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
+    """Uloží vybraný katalog (inventory_id) do konfigurace a ihned spustí sync skladovosti."""
     company_id = _get_company_id(payload, db)
     config = _get_config(company_id, db)
     if not config:
@@ -107,7 +111,50 @@ async def save_inventory(data: BaselinkerConfigIn, payload: dict = Depends(verif
 
     config.inventory_id = data.inventory_id
     db.commit()
-    return {"ok": True, "inventory_id": config.inventory_id, "message": "Katalog uložen"}
+
+    # Ihned spusť sync skladovosti
+    client = BaselinkerClient(config.api_token)
+    synced = 0
+    errors = 0
+    try:
+        from app.models import Product
+        from datetime import datetime, timezone
+        bl_products = await client.get_all_products(data.inventory_id)
+
+        sku_to_stock: dict[str, int] = {}
+        ean_to_stock: dict[str, int] = {}
+        for p in bl_products:
+            sku = (p.get("sku") or "").strip()
+            ean = (p.get("ean") or "").strip()
+            stock = p.get("stock", {})
+            total = int(sum(v for v in stock.values() if isinstance(v, (int, float))))
+            if sku:
+                sku_to_stock[sku] = total
+            if ean:
+                ean_to_stock[ean] = total
+
+        products = db.query(Product).filter(Product.company_id == company_id).all()
+        for product in products:
+            key_sku = (product.product_code or product.sku or "").strip()
+            key_ean = (product.ean or "").strip()
+            if key_ean and key_ean in ean_to_stock:
+                product.stock_quantity = ean_to_stock[key_ean]
+                synced += 1
+            elif key_sku and key_sku in sku_to_stock:
+                product.stock_quantity = sku_to_stock[key_sku]
+                synced += 1
+
+        config.last_sync_at = datetime.now(timezone.utc)
+        db.commit()
+    except Exception as e:
+        errors += 1
+
+    return {
+        "ok": True,
+        "inventory_id": config.inventory_id,
+        "message": f"Katalog uložen. Synchronizováno {synced} produktů." + (f" ({errors} chyb)" if errors else ""),
+        "synced": synced,
+    }
 
 
 @router.get("/inventories")
