@@ -13,6 +13,7 @@ from .competitor_alert import CompetitorAlert
 from .feed_subscription import FeedSubscription
 from .competitor_product_price import CompetitorProductPrice, CompetitorPriceHistory
 from .baselinker import BaselinkerConfig
+from .baselinker_match import BaselinkerProductMatch
 from .recommendation import PriceRecommendation
 from .watchlist import WatchedProduct
 from .hero import HeroScore
@@ -22,5 +23,5 @@ __all__ = [
     "Company", "User", "Product", "Price", "AuditLog", "Analytics", "LoginAttempt",
     "CatalogProduct", "Competitor", "CompetitorPrice", "CompetitorRank", "CompetitorAlert",
     "FeedSubscription", "CompetitorProductPrice", "CompetitorPriceHistory", "BaselinkerConfig",
-    "PriceRecommendation", "WatchedProduct", "HeroScore", "SeasonalityRule"
+    "BaselinkerProductMatch", "PriceRecommendation", "WatchedProduct", "HeroScore", "SeasonalityRule"
 ]

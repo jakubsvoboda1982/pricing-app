@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional
+from uuid import UUID
 from app.database import get_db
 from app.middleware.auth import verify_token
 from app.models import BaselinkerConfig, Product
@@ -35,6 +36,14 @@ class SyncResult(BaseModel):
     not_found: int
     errors: int
     message: str
+
+
+class MatchIn(BaseModel):
+    bl_product_id: str
+    bl_sku: Optional[str] = None
+    bl_ean: Optional[str] = None
+    bl_name: Optional[str] = None
+    product_id: Optional[str] = None  # UUID as string, None = zrušit párování
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -332,3 +341,141 @@ async def sync_by_ean(payload: dict = Depends(verify_token), db: Session = Depen
         errors=errors,
         message=f"Synchronizováno {synced} produktů (EAN/SKU/PRODUCTNO), {not_found} nenalezeno",
     )
+
+
+# ── Přehled produktů z Baselinker + ruční párování ───────────────────────────
+
+@router.get("/products")
+async def get_bl_products(
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Načte všechny produkty z Baslinker (vybraného katalogu) a přidá info o párování."""
+    from app.models import BaselinkerProductMatch
+    company_id = _get_company_id(payload, db)
+    config = _get_config(company_id, db)
+    if not config:
+        raise HTTPException(status_code=404, detail="Baselinker není nastaven")
+    if not config.inventory_id:
+        raise HTTPException(status_code=400, detail="Není vybrán katalog (inventory_id)")
+
+    client = BaselinkerClient(config.api_token)
+    try:
+        bl_products = await client.get_all_products(config.inventory_id)
+    except BaselinkerError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Načti existující párování pro tuto firmu
+    matches = db.query(BaselinkerProductMatch).filter(
+        BaselinkerProductMatch.company_id == company_id
+    ).all()
+    match_by_bl_id: dict[str, BaselinkerProductMatch] = {str(m.bl_product_id): m for m in matches}
+
+    result = []
+    for p in bl_products:
+        bl_id = str(p.get("baselinker_id", ""))
+        stock = p.get("stock", {})
+        total_stock = int(sum(v for v in stock.values() if isinstance(v, (int, float))))
+
+        # Cena – Baselinker vrací různé price_* fieldy; vezmi první neprázdnou
+        raw_price = (
+            p.get("price_brutto") or
+            p.get("price_wholesale") or
+            p.get("price") or
+            None
+        )
+        price = float(raw_price) if raw_price not in (None, "", 0) else None
+
+        match = match_by_bl_id.get(bl_id)
+        matched_product = None
+        if match and match.product_id:
+            prod = match.product
+            if prod:
+                matched_product = {
+                    "id": str(prod.id),
+                    "name": prod.name,
+                    "sku": prod.sku,
+                    "match_id": str(match.id),
+                }
+            else:
+                matched_product = {"match_id": str(match.id)}
+
+        result.append({
+            "bl_product_id": bl_id,
+            "name": p.get("name", ""),
+            "sku": (p.get("sku") or "").strip(),
+            "ean": (p.get("ean") or "").strip(),
+            "stock": total_stock,
+            "price": price,
+            "matched_product": matched_product,
+        })
+
+    return {"products": result, "total": len(result)}
+
+
+@router.post("/matches")
+def create_or_update_match(
+    data: MatchIn,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Vytvoří nebo aktualizuje ruční párování BL produktu s naším produktem."""
+    from app.models import BaselinkerProductMatch
+    company_id = _get_company_id(payload, db)
+
+    existing = db.query(BaselinkerProductMatch).filter(
+        BaselinkerProductMatch.company_id == company_id,
+        BaselinkerProductMatch.bl_product_id == data.bl_product_id,
+    ).first()
+
+    product_uuid = None
+    if data.product_id:
+        try:
+            import uuid as uuid_lib
+            product_uuid = uuid_lib.UUID(data.product_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Neplatné product_id")
+
+    if existing:
+        existing.product_id = product_uuid
+        existing.bl_sku = data.bl_sku
+        existing.bl_ean = data.bl_ean
+        existing.bl_name = data.bl_name
+        db.commit()
+        db.refresh(existing)
+        return {"ok": True, "match_id": str(existing.id)}
+    else:
+        new_match = BaselinkerProductMatch(
+            company_id=company_id,
+            bl_product_id=data.bl_product_id,
+            bl_sku=data.bl_sku,
+            bl_ean=data.bl_ean,
+            bl_name=data.bl_name,
+            product_id=product_uuid,
+        )
+        db.add(new_match)
+        db.commit()
+        db.refresh(new_match)
+        return {"ok": True, "match_id": str(new_match.id)}
+
+
+@router.delete("/matches/{match_id}")
+def delete_match(
+    match_id: UUID,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Odstraní ruční párování."""
+    from app.models import BaselinkerProductMatch
+    company_id = _get_company_id(payload, db)
+
+    match = db.query(BaselinkerProductMatch).filter(
+        BaselinkerProductMatch.id == match_id,
+        BaselinkerProductMatch.company_id == company_id,
+    ).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Párování nenalezeno")
+
+    db.delete(match)
+    db.commit()
+    return {"ok": True}

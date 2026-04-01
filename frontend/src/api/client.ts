@@ -311,6 +311,24 @@ export class APIClient {
     return this.request('POST', '/baselinker/save-inventory', { inventory_id })
   }
 
+  async getBaselinkerProducts() {
+    return this.request('GET', '/baselinker/products')
+  }
+
+  async saveBaselinkerMatch(data: {
+    bl_product_id: string
+    bl_sku?: string
+    bl_ean?: string
+    bl_name?: string
+    product_id?: string | null
+  }) {
+    return this.request('POST', '/baselinker/matches', data)
+  }
+
+  async deleteBaselinkerMatch(matchId: string) {
+    return this.request('DELETE', `/baselinker/matches/${matchId}`)
+  }
+
   // Recommendations
   async generateRecommendation(productId: string) {
     return this.request('POST', `/recommendations/generate/${productId}`)
