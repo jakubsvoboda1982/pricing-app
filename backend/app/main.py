@@ -87,13 +87,13 @@ async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
     # Spusť každý den v 02:00 UTC
     scheduler.add_job(run_all_active_feeds, 'cron', hour=2, minute=0)
-    # Spusť každý týden v pondělí v 03:00 UTC
-    scheduler.add_job(update_competitor_prices_scheduled, 'cron', day_of_week=0, hour=3, minute=0)
+    # Spusť každý týden ve středu v 02:00 UTC
+    scheduler.add_job(update_competitor_prices_scheduled, 'cron', day_of_week=2, hour=2, minute=0)
     # Spusť každý den v 04:00 UTC
     scheduler.add_job(sync_baselinker_stock_scheduled, 'cron', hour=4, minute=0)
     scheduler.start()
     print("[Scheduler] Denní načítání feedů aktivováno (02:00 UTC)")
-    print("[Scheduler] Týdenní aktualizace cen konkurence aktivována (pondělí 03:00 UTC)")
+    print("[Scheduler] Týdenní aktualizace cen konkurence aktivována (středa 02:00 UTC)")
     print("[Scheduler] Denní synchronizace Baselinker skladů aktivována (04:00 UTC)")
     yield
     # Shutdown

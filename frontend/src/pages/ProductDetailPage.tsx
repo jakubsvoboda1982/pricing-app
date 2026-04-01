@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ExternalLink, Plus, Trash2, Edit2, Save, X, Package, TrendingUp, Link2, ShoppingCart, Factory } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Plus, Trash2, Edit2, Save, X, Package, TrendingUp, Link2, ShoppingCart, Factory, RefreshCw, Clock, ChevronDown, ChevronUp } from 'lucide-react'
 import { API_BASE_URL } from '@/api/client'
 
 interface CompetitorUrl {
@@ -43,6 +43,22 @@ interface PriceRecord {
   current_price: number
   old_price?: number | null
   changed_at: string
+}
+
+interface CompetitorPriceRecord {
+  id: string
+  competitor_url: string
+  price: number | null
+  currency: string
+  market: string
+  last_fetched_at: string | null
+  fetch_status: string | null
+  fetch_error: string | null
+}
+
+interface PriceHistoryEntry {
+  price: number
+  recorded_at: string
 }
 
 function authHeaders() {
@@ -130,6 +146,10 @@ export default function ProductDetailPage() {
   const [newUrl, setNewUrl] = useState('')
   const [newUrlMarket, setNewUrlMarket] = useState<'CZ' | 'SK'>('CZ')
   const [addingUrl, setAddingUrl] = useState(false)
+  const [editingPriceId, setEditingPriceId] = useState<string | null>(null)
+  const [manualPriceInput, setManualPriceInput] = useState('')
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null)
+  const [historyData, setHistoryData] = useState<Record<string, PriceHistoryEntry[]>>({})
 
   const { data: product, isLoading } = useQuery({
     queryKey: ['product', id],
@@ -147,6 +167,16 @@ export default function ProductDetailPage() {
       if (!res.ok) return []
       return await res.json() as PriceRecord[]
     },
+  })
+
+  const { data: competitorPrices = [], refetch: refetchCompetitorPrices } = useQuery({
+    queryKey: ['competitor-prices', id],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/competitor-prices/${id}`, { headers: authHeaders() })
+      if (!res.ok) return []
+      return await res.json() as CompetitorPriceRecord[]
+    },
+    enabled: !!id,
   })
 
   const setPriceMutation = useMutation({
@@ -240,6 +270,53 @@ export default function ProductDetailPage() {
 
   const handleClearManufacturingCost = () => {
     setPricingMutation.mutate({ clear_manufacturing_cost: true })
+  }
+
+  const handleRefreshUrl = async (url: string) => {
+    await fetch(`${API_BASE_URL}/competitor-prices/${id}/refresh-url?url=${encodeURIComponent(url)}`, {
+      method: 'POST', headers: authHeaders(),
+    })
+    refetchCompetitorPrices()
+    queryClient.invalidateQueries({ queryKey: ['product', id] })
+  }
+
+  const handleRefreshAll = async () => {
+    await fetch(`${API_BASE_URL}/competitor-prices/${id}/refresh`, {
+      method: 'POST', headers: authHeaders(),
+    })
+    refetchCompetitorPrices()
+    queryClient.invalidateQueries({ queryKey: ['product', id] })
+  }
+
+  const handleSaveManualPrice = async (compPriceId: string) => {
+    const price = parseFloat(manualPriceInput.replace(',', '.'))
+    if (isNaN(price) || price <= 0) return
+    await fetch(`${API_BASE_URL}/competitor-prices/by-url/${compPriceId}/manual`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ price }),
+    })
+    setEditingPriceId(null)
+    setManualPriceInput('')
+    refetchCompetitorPrices()
+    queryClient.invalidateQueries({ queryKey: ['product', id] })
+  }
+
+  const handleToggleHistory = async (compPriceId: string) => {
+    if (expandedHistoryId === compPriceId) {
+      setExpandedHistoryId(null)
+      return
+    }
+    setExpandedHistoryId(compPriceId)
+    if (!historyData[compPriceId]) {
+      const res = await fetch(`${API_BASE_URL}/competitor-prices/by-url/${compPriceId}/history`, {
+        headers: authHeaders()
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setHistoryData(prev => ({ ...prev, [compPriceId]: data }))
+      }
+    }
   }
 
   if (isLoading || !product) {
@@ -571,29 +648,39 @@ export default function ProductDetailPage() {
 
         {/* MIDDLE: Ceny konkurentů */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold text-gray-900">Ceny konkurentů</h2>
-            <button onClick={() => setShowAddUrl(true)}
-              className="flex items-center gap-1 text-xs text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200 transition">
-              <Plus size={13} /> Přidat URL
-            </button>
+            <div className="flex gap-1.5">
+              {competitorUrls.length > 0 && (
+                <button onClick={handleRefreshAll}
+                  className="flex items-center gap-1 text-xs text-gray-600 hover:bg-gray-100 px-2 py-1.5 rounded-lg border border-gray-200 transition">
+                  <RefreshCw size={12} /> Aktualizovat vše
+                </button>
+              )}
+              <button onClick={() => setShowAddUrl(true)}
+                className="flex items-center gap-1 text-xs text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200 transition">
+                <Plus size={13} /> Přidat URL
+              </button>
+            </div>
           </div>
 
           {lowestCompetitorPrice != null && (
-            <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
-              <p className="text-xs text-gray-600 mb-1">Nejnižší cena konkurence:</p>
-              <p className="text-lg font-bold text-blue-700">{lowestCompetitorPrice.toLocaleString('cs-CZ')} CZK</p>
+            <div className="mb-3 p-2.5 bg-blue-50 rounded-lg border border-blue-100 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-600">Nejnižší cena:</p>
+                <p className="text-base font-bold text-blue-700">{lowestCompetitorPrice.toLocaleString('cs-CZ')} CZK</p>
+              </div>
               {currentPrice != null && (
-                <p className="text-xs text-gray-600 mt-1">
-                  {currentPrice > lowestCompetitorPrice ? '↑' : '↓'} {Math.abs(currentPrice - lowestCompetitorPrice).toLocaleString('cs-CZ')} CZK od nejnižší ceny
-                </p>
+                <span className={`text-xs font-medium px-2 py-1 rounded ${currentPrice <= lowestCompetitorPrice ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                  {currentPrice <= lowestCompetitorPrice ? '✓ Nejlevnější' : `+${(currentPrice - lowestCompetitorPrice).toLocaleString('cs-CZ')} CZK`}
+                </span>
               )}
             </div>
           )}
 
           {showAddUrl && (
-            <div className="mb-4 p-3 bg-blue-50 rounded-lg space-y-2">
-              <div className="flex gap-1 mb-2">
+            <div className="mb-3 p-3 bg-blue-50 rounded-lg space-y-2 border border-blue-100">
+              <div className="flex gap-1 mb-1">
                 {(['CZ', 'SK'] as const).map(m => (
                   <button key={m} onClick={() => setNewUrlMarket(m)}
                     className={`px-2 py-1 rounded text-xs font-medium ${newUrlMarket === m ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600'}`}>
@@ -623,35 +710,124 @@ export default function ProductDetailPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {competitorUrls.map((item) => (
-                <div key={item.url} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
-                  <img src={`https://www.google.com/s2/favicons?sz=32&domain_url=https://${getDomain(item.url)}`}
-                    alt="" className="w-4 h-4 flex-shrink-0" onError={(e) => { e.currentTarget.style.display = 'none' }} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-gray-700 truncate">{item.name}</p>
-                    <a href={item.url} target="_blank" rel="noopener noreferrer"
-                      className="text-xs text-blue-500 hover:underline truncate flex items-center gap-0.5">
-                      <ExternalLink size={10} className="flex-shrink-0" />
-                      {getDomain(item.url)}
-                    </a>
-                  </div>
-                  {lowestCompetitorPrice != null && (
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-xs font-semibold text-gray-900">
-                        {lowestCompetitorPrice.toLocaleString('cs-CZ')} CZK
-                      </p>
-                      <p className="text-xs text-gray-400">konkurence</p>
+              {competitorUrls.map((item) => {
+                // Find scraped price record for this URL
+                const priceRecord = competitorPrices.find(cp => cp.competitor_url === item.url)
+                const isEditing = editingPriceId === (priceRecord?.id ?? item.url)
+                const isHistoryOpen = expandedHistoryId === priceRecord?.id
+                const history = priceRecord ? (historyData[priceRecord.id] ?? []) : []
+
+                return (
+                  <div key={item.url} className="rounded-lg border border-gray-100 bg-gray-50 overflow-hidden">
+                    {/* Main row */}
+                    <div className="flex items-center gap-2 px-3 py-2">
+                      <img src={`https://www.google.com/s2/favicons?sz=32&domain_url=https://${getDomain(item.url)}`}
+                        alt="" className="w-4 h-4 flex-shrink-0" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-gray-700 truncate">{item.name || getDomain(item.url)}</p>
+                        <a href={item.url} target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-blue-500 hover:underline flex items-center gap-0.5 truncate">
+                          <ExternalLink size={10} className="flex-shrink-0" />{getDomain(item.url)}
+                        </a>
+                      </div>
+
+                      {/* Price */}
+                      <div className="text-right flex-shrink-0">
+                        {priceRecord?.price != null ? (
+                          <p className={`text-sm font-bold ${currentPrice && priceRecord.price < currentPrice ? 'text-red-600' : priceRecord.price === currentPrice ? 'text-gray-600' : 'text-green-700'}`}>
+                            {Number(priceRecord.price).toLocaleString('cs-CZ')} CZK
+                          </p>
+                        ) : (
+                          <span className={`text-xs ${priceRecord?.fetch_status === 'error' ? 'text-red-400' : 'text-gray-400'}`}>
+                            {priceRecord?.fetch_status === 'error' ? 'Chyba' : 'Nenačteno'}
+                          </span>
+                        )}
+                        {priceRecord?.last_fetched_at && (
+                          <p className="text-xs text-gray-400 flex items-center gap-0.5 justify-end">
+                            <Clock size={9} />
+                            {new Date(priceRecord.last_fetched_at).toLocaleDateString('cs-CZ')}
+                            {priceRecord.fetch_status === 'manual' && <span className="text-yellow-600 ml-0.5">✎</span>}
+                          </p>
+                        )}
+                      </div>
+
+                      <span className={`text-xs px-1 py-0.5 rounded font-medium flex-shrink-0 ${item.market === 'CZ' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                        {item.market === 'CZ' ? '🇨🇿' : '🇸🇰'}
+                      </span>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-0.5 flex-shrink-0">
+                        <button onClick={() => handleRefreshUrl(item.url)} title="Znovu načíst cenu"
+                          className="p-1 text-gray-400 hover:text-blue-600 transition">
+                          <RefreshCw size={12} />
+                        </button>
+                        <button onClick={() => { setEditingPriceId(isEditing ? null : (priceRecord?.id ?? item.url)); setManualPriceInput(priceRecord?.price ? String(priceRecord.price) : '') }}
+                          title="Zadat cenu ručně"
+                          className={`p-1 transition ${isEditing ? 'text-blue-600' : 'text-gray-400 hover:text-blue-600'}`}>
+                          <Edit2 size={12} />
+                        </button>
+                        {priceRecord && (
+                          <button onClick={() => handleToggleHistory(priceRecord.id)} title="Historie cen"
+                            className={`p-1 transition ${isHistoryOpen ? 'text-blue-600' : 'text-gray-400 hover:text-blue-600'}`}>
+                            {isHistoryOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                          </button>
+                        )}
+                        <button onClick={() => removeUrlMutation.mutate(item.url)} title="Odstranit"
+                          className="p-1 text-gray-400 hover:text-red-600 transition">
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     </div>
-                  )}
-                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
-                    item.market === 'CZ' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
-                  }`}>{item.market === 'CZ' ? '🇨🇿' : '🇸🇰'}</span>
-                  <button onClick={() => removeUrlMutation.mutate(item.url)}
-                    className="text-gray-400 hover:text-red-600 flex-shrink-0 p-0.5">
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
+
+                    {/* Error message */}
+                    {priceRecord?.fetch_error && priceRecord.fetch_status === 'error' && (
+                      <p className="px-3 pb-2 text-xs text-red-500">{priceRecord.fetch_error}</p>
+                    )}
+
+                    {/* Manual price form */}
+                    {isEditing && (
+                      <div className="px-3 pb-3 pt-1 border-t border-gray-100 bg-white flex items-end gap-2">
+                        <div className="flex-1">
+                          <label className="text-xs text-gray-600">Cena s DPH (ruční)</label>
+                          <input type="text" value={manualPriceInput}
+                            onChange={(e) => setManualPriceInput(e.target.value)}
+                            placeholder="299.00" autoFocus
+                            className="mt-1 w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                        <button onClick={() => handleSaveManualPrice(priceRecord?.id ?? '')} disabled={!priceRecord}
+                          className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs disabled:opacity-50">
+                          <Save size={11} /> Uložit
+                        </button>
+                        <button onClick={() => setEditingPriceId(null)}
+                          className="p-1.5 text-gray-400 hover:text-gray-600">
+                          <X size={13} />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Price history */}
+                    {isHistoryOpen && (
+                      <div className="border-t border-gray-100 bg-white px-3 py-2">
+                        <p className="text-xs font-medium text-gray-600 mb-2 flex items-center gap-1">
+                          <Clock size={11} /> Historie cen
+                        </p>
+                        {history.length === 0 ? (
+                          <p className="text-xs text-gray-400">Zatím žádná historie.</p>
+                        ) : (
+                          <div className="space-y-1 max-h-32 overflow-y-auto">
+                            {history.map((h, i) => (
+                              <div key={i} className="flex items-center justify-between text-xs">
+                                <span className="text-gray-500">{new Date(h.recorded_at).toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit', year: '2-digit' })}</span>
+                                <span className="font-medium text-gray-800">{Number(h.price).toLocaleString('cs-CZ')} CZK</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

@@ -60,7 +60,8 @@ export default function ProductsPage() {
   const filtered = (products as Product[]).filter((p) => {
     const matchSearch = !search ||
       p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase())
+      p.sku.toLowerCase().includes(search.toLowerCase()) ||
+      (p.product_code ?? '').toLowerCase().includes(search.toLowerCase())
     const matchMarket = shouldShowMarket(p.market, selectedMarket)
     return matchSearch && matchMarket
   })

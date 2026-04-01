@@ -9,6 +9,8 @@ from app.database import get_db
 from app.models import Product, CompetitorProductPrice, CompetitorPriceHistory
 from app.schemas.product import CompetitorProductPriceResponse, ProductResponse
 from app.competitor_scraper import scrape_competitor_price, update_all_competitor_prices
+from app.middleware.auth import verify_token
+from pydantic import BaseModel
 from uuid import UUID
 from decimal import Decimal
 from datetime import datetime, timedelta
@@ -21,8 +23,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/competitor-prices", tags=["competitor-prices"])
 
 
+class ManualPriceIn(BaseModel):
+    price: Decimal
+    note: Optional[str] = None
+
+
 @router.get("/{product_id}", response_model=List[CompetitorProductPriceResponse])
-def get_competitor_prices(product_id: UUID, db: Session = Depends(get_db)):
+def get_competitor_prices(
+    product_id: UUID,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
     """Get all tracked competitor prices for a product."""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
@@ -36,7 +47,12 @@ def get_competitor_prices(product_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/{product_id}/track")
-def add_competitor_url_tracking(product_id: UUID, url: str, db: Session = Depends(get_db)):
+def add_competitor_url_tracking(
+    product_id: UUID,
+    url: str,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
     """
     Add a competitor URL to track for this product.
     Creates a new CompetitorProductPrice record.
@@ -71,7 +87,12 @@ def add_competitor_url_tracking(product_id: UUID, url: str, db: Session = Depend
 
 
 @router.delete("/{product_id}/track")
-def remove_competitor_url_tracking(product_id: UUID, url: str, db: Session = Depends(get_db)):
+def remove_competitor_url_tracking(
+    product_id: UUID,
+    url: str,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
     """Remove a competitor URL from tracking."""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
@@ -98,7 +119,11 @@ def remove_competitor_url_tracking(product_id: UUID, url: str, db: Session = Dep
 
 
 @router.post("/{product_id}/refresh")
-async def refresh_competitor_prices(product_id: UUID, db: Session = Depends(get_db)):
+async def refresh_competitor_prices(
+    product_id: UUID,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
     """
     Manually trigger a refresh of all competitor prices for this product.
     """
@@ -195,6 +220,96 @@ def get_price_history(product_id: UUID, url_index: int, db: Session = Depends(ge
         }
         for h in history
     ]
+
+
+@router.get("/by-url/{comp_price_id}/history")
+def get_history_by_id(
+    comp_price_id: UUID,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Načti historii cen pro konkrétní URL konkurenta (dle ID záznamu)."""
+    history = db.query(CompetitorPriceHistory).filter(
+        CompetitorPriceHistory.competitor_price_id == comp_price_id
+    ).order_by(desc(CompetitorPriceHistory.recorded_at)).limit(50).all()
+
+    return [{"price": float(h.price), "recorded_at": h.recorded_at} for h in history]
+
+
+@router.patch("/by-url/{comp_price_id}/manual")
+def set_manual_price(
+    comp_price_id: UUID,
+    data: ManualPriceIn,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Nastav cenu konkurenta ručně a zaznamenej do historie."""
+    comp_price = db.query(CompetitorProductPrice).filter(
+        CompetitorProductPrice.id == comp_price_id
+    ).first()
+    if not comp_price:
+        raise HTTPException(status_code=404, detail="Záznam nenalezen")
+
+    # Ulož starou cenu do historie pokud existuje
+    if comp_price.price is not None:
+        db.add(CompetitorPriceHistory(
+            competitor_price_id=comp_price_id,
+            price=comp_price.price,
+        ))
+
+    # Nastav novou cenu
+    comp_price.price = data.price
+    comp_price.last_fetched_at = datetime.utcnow()
+    comp_price.fetch_status = "manual"
+    comp_price.fetch_error = None
+    db.commit()
+    db.refresh(comp_price)
+
+    return {"ok": True, "price": float(comp_price.price), "fetch_status": "manual"}
+
+
+@router.post("/{product_id}/refresh-url")
+async def refresh_single_url(
+    product_id: UUID,
+    url: str,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Znovu načti cenu pro jednu URL konkurenta."""
+    comp_price = db.query(CompetitorProductPrice).filter(
+        CompetitorProductPrice.product_id == product_id,
+        CompetitorProductPrice.competitor_url == url,
+    ).first()
+    if not comp_price:
+        raise HTTPException(status_code=404, detail="URL není sledována")
+
+    try:
+        price = await scrape_competitor_price(comp_price.competitor_url)
+        if price is not None:
+            if comp_price.price is not None:
+                db.add(CompetitorPriceHistory(competitor_price_id=comp_price.id, price=comp_price.price))
+            comp_price.price = price
+            comp_price.last_fetched_at = datetime.utcnow()
+            comp_price.fetch_status = "success"
+            comp_price.fetch_error = None
+            comp_price.next_update_at = datetime.utcnow() + timedelta(days=7)
+        else:
+            comp_price.fetch_status = "error"
+            comp_price.fetch_error = "Cena nenalezena"
+            comp_price.last_fetched_at = datetime.utcnow()
+        db.commit()
+    except Exception as e:
+        comp_price.fetch_status = "error"
+        comp_price.fetch_error = str(e)
+        comp_price.last_fetched_at = datetime.utcnow()
+        db.commit()
+
+    return {
+        "ok": True,
+        "price": float(comp_price.price) if comp_price.price else None,
+        "fetch_status": comp_price.fetch_status,
+        "fetch_error": comp_price.fetch_error,
+    }
 
 
 @router.post("/update-all")
