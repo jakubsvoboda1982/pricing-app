@@ -3,7 +3,8 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Search, Plus, CheckCircle, Package, ExternalLink, ChevronDown,
-  ArrowUpDown, ArrowUp, ArrowDown, X, Eye, SlidersHorizontal, Weight
+  ArrowUpDown, ArrowUp, ArrowDown, X, Eye, SlidersHorizontal, Weight,
+  Bookmark
 } from 'lucide-react'
 import { apiClient, API_BASE_URL } from '@/api/client'
 import { useMarketStore } from '@/store/market'
@@ -91,6 +92,10 @@ export default function CatalogPage() {
   const [addingId, setAddingId] = useState<string | null>(null)
   const [manufacturerOpen, setManufacturerOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkAdding, setBulkAdding] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
 
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -203,6 +208,63 @@ export default function CatalogPage() {
     } finally {
       setAddingId(null)
     }
+  }
+
+  // Selection helpers — only non-watched products can be selected
+  const selectableIds = useMemo(
+    () => sorted.filter(p => !p.watched_product_id && !addedProducts.has(p.id)).map(p => p.id),
+    [sorted, addedProducts]
+  )
+  const allSelected = selectableIds.length > 0 && selectableIds.every(id => selectedIds.has(id))
+  const someSelected = selectedIds.size > 0
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(selectableIds))
+    }
+  }
+
+  const toggleOne = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const handleBulkAddToWatchlist = async () => {
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    setBulkAdding(true)
+    setBulkProgress({ done: 0, total: ids.length })
+    let done = 0
+    for (const id of ids) {
+      const product = sorted.find(p => p.id === id)
+      if (!product) { done++; continue }
+      try {
+        await apiClient.createProduct({
+          name: product.name,
+          sku: product.ean || `catalog-${product.id}`,
+          category: product.category,
+          catalog_product_id: product.id,
+          ean: product.ean,
+          thumbnail_url: product.thumbnail_url,
+          url_reference: product.url_reference,
+        })
+        setAddedProducts(prev => new Set(prev).add(id))
+      } catch {
+        setAddedProducts(prev => new Set(prev).add(id))
+      }
+      done++
+      setBulkProgress({ done, total: ids.length })
+    }
+    setSelectedIds(new Set())
+    setBulkAdding(false)
+    setBulkProgress(null)
+    queryClient.invalidateQueries({ queryKey: ['products'] })
+    queryClient.invalidateQueries({ queryKey: ['catalogProducts'] })
   }
 
   const activeFiltersCount = [
@@ -411,8 +473,45 @@ export default function CatalogPage() {
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          {/* Bulk action bar */}
+          {someSelected && (
+            <div className="flex items-center justify-between px-4 py-2.5 bg-blue-50 border-b border-blue-200">
+              <span className="text-sm font-medium text-blue-800">
+                Vybráno {selectedIds.size} produktů
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectedIds(new Set())}
+                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                >
+                  Zrušit výběr
+                </button>
+                <button
+                  onClick={handleBulkAddToWatchlist}
+                  disabled={bulkAdding}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition disabled:opacity-60"
+                >
+                  <Bookmark size={13} />
+                  {bulkAdding && bulkProgress
+                    ? `Přidávám ${bulkProgress.done}/${bulkProgress.total}...`
+                    : `Přidat do Sledovaných (${selectedIds.size})`}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Table header */}
           <div className="flex items-center px-4 py-3 border-b border-gray-100 bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wide">
+            {/* Select all checkbox */}
+            <div className="w-8 flex-shrink-0 flex items-center">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleAll}
+                disabled={selectableIds.length === 0}
+                className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 cursor-pointer disabled:opacity-30"
+              />
+            </div>
             <div className="flex-1 min-w-0">
               <button
                 onClick={() => handleSort('name')}
@@ -447,14 +546,32 @@ export default function CatalogPage() {
               const isAdded = addedProducts.has(product.id)
               const isAdding = addingId === product.id
               const isWatched = !!product.watched_product_id
+              const isSelected = selectedIds.has(product.id)
+              const isSelectable = !isWatched && !isAdded
               const hasCompetitors = (product.competitor_urls?.length ?? 0) > 0
               const currency = product.market === 'SK' ? 'EUR' : 'Kč'
 
               return (
                 <div
                   key={product.id}
-                  className={`flex items-center px-4 py-3.5 hover:bg-gray-50 transition ${isWatched ? 'border-l-2 border-l-green-400' : ''}`}
+                  className={`flex items-center px-4 py-3.5 hover:bg-gray-50 transition ${
+                    isSelected ? 'bg-blue-50 hover:bg-blue-50' : ''
+                  } ${isWatched ? 'border-l-2 border-l-green-400' : ''}`}
                 >
+                  {/* Checkbox */}
+                  <div className="w-8 flex-shrink-0 flex items-center">
+                    {isSelectable ? (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleOne(product.id)}
+                        className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 cursor-pointer"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div className="w-3.5 h-3.5" />
+                    )}
+                  </div>
                   {/* Product info */}
                   <div className="flex-1 min-w-0 flex items-center gap-3">
                     {product.thumbnail_url ? (
