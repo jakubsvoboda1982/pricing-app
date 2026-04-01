@@ -24,36 +24,64 @@ USER_AGENT = (
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
-# ── Regexové zálohy ───────────────────────────────────────────────────────────
+# ── Regexové vzory pro extrakci ceny ─────────────────────────────────────────
 # Pořadí: specifické → obecné
+# Číslo s mezerou jako oddělovačem tisíců: "1 399" nebo "1&nbsp;399"
+_NUM = r'([1-9][0-9]{0,2}(?:[\xa0\u00a0 \u202f][0-9]{3})*(?:[.,][0-9]{1,2})?)'
+
 PRICE_PATTERNS = [
-    # data-price="299"  /  data-price='299'
-    re.compile(r'data-price=["\']([0-9 ]+(?:[.,][0-9]{1,2})?)["\']', re.IGNORECASE),
+    # data-price="299" / data-price-dph="299" / data-original-price="299"
+    re.compile(r'data-(?:price|price-dph|original-price|sale-price)=["\']' + _NUM + r'["\']', re.IGNORECASE),
     # <meta property="product:price:amount" content="299"/>
-    re.compile(r'property=["\']product:price:amount["\'][^>]*content=["\']([0-9 ]+(?:[.,][0-9]{1,2})?)["\']', re.IGNORECASE),
-    re.compile(r'content=["\']([0-9 ]+(?:[.,][0-9]{1,2})?)["\'][^>]*property=["\']product:price:amount["\']', re.IGNORECASE),
+    re.compile(r'property=["\']product:price:amount["\'][^>]*content=["\']' + _NUM + r'["\']', re.IGNORECASE),
+    re.compile(r'content=["\']' + _NUM + r'["\'][^>]*property=["\']product:price:amount["\']', re.IGNORECASE),
     # <meta itemprop="price" content="299">
-    re.compile(r'itemprop=["\']price["\'][^>]*content=["\']([0-9 ]+(?:[.,][0-9]{1,2})?)["\']', re.IGNORECASE),
-    re.compile(r'content=["\']([0-9 ]+(?:[.,][0-9]{1,2})?)["\'][^>]*itemprop=["\']price["\']', re.IGNORECASE),
-    # <span class="price">299</span>  – různé varianty class
-    re.compile(r'<[^>]+class="[^"]*(?:product-?price|price-?final|price-?current|cena)[^"]*"[^>]*>\s*(?:<[^>]+>)*([0-9 ]+(?:[.,][0-9]{1,2})?)\s*(?:Kč|CZK|€|EUR)?', re.IGNORECASE),
-    # Obecný vzor: číslo + CZK/Kč v těsné blízkosti
-    re.compile(r'\b([1-9][0-9]{0,5}(?:[.,][0-9]{1,2})?)\s*(?:Kč|CZK)\b', re.IGNORECASE),
+    re.compile(r'itemprop=["\']price["\'][^>]*content=["\']' + _NUM + r'["\']', re.IGNORECASE),
+    re.compile(r'content=["\']' + _NUM + r'["\'][^>]*itemprop=["\']price["\']', re.IGNORECASE),
+    # Shoptet CZ – nejrozšířenější platforma v ČR
+    # <strong class="price-final__price">399</strong>
+    re.compile(r'class=["\'][^"\']*price-final[^"\']*["\'][^>]*>\s*(?:<[^>]+>)*\s*' + _NUM, re.IGNORECASE),
+    # <p class="price-wrapper ..."><strong>399</strong>
+    re.compile(r'class=["\'][^"\']*price-wrapper[^"\']*["\'][^>]*>.*?' + _NUM + r'\s*(?:Kč|CZK|€|EUR)?', re.IGNORECASE | re.DOTALL),
+    # WooCommerce: <span class="woocommerce-Price-amount amount">
+    re.compile(r'woocommerce-Price-amount[^>]*>\s*(?:<[^>]+>)*\s*' + _NUM, re.IGNORECASE),
+    # PrestaShop: <span class="price" ...> / .current-price-value
+    re.compile(r'class=["\'][^"\']*current-price[^"\']*["\'][^>]*>\s*(?:<[^>]+>)*\s*' + _NUM, re.IGNORECASE),
+    # Magento/obecné: class obsahující "price"
+    re.compile(r'<[^>]+class="[^"]*(?:product-?price|price-?final|price-?current|final-?price|selling-?price|sale-?price|our-?price|cena-?final)[^"]*"[^>]*>\s*(?:<[^>]+>)*\s*' + _NUM + r'\s*(?:Kč|CZK|€|EUR)?', re.IGNORECASE),
+    # JSON v atributu nebo skriptu: "price":"399" / "price":399
+    re.compile(r'"(?:price|cena|Price)":\s*["\']?' + _NUM + r'["\']?', re.IGNORECASE),
+    # Poslední záchrana: číslo těsně před nebo za Kč/CZK
+    re.compile(r'\b' + _NUM + r'\s*(?:Kč|CZK)\b', re.IGNORECASE),
+    re.compile(r'(?:Kč|CZK)\s*' + _NUM + r'\b', re.IGNORECASE),
 ]
 
 
-async def fetch_page_content(url: str, timeout: int = 15) -> Optional[str]:
+async def fetch_page_content(url: str, timeout: int = 20) -> Optional[str]:
     """
     Stáhni stránku konkurenta. Posílá hlavičky reálného prohlížeče.
     """
+    try:
+        # Sestav Referer z domény URL
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+    except Exception:
+        origin = "https://www.google.com"
+
     headers = {
         'User-Agent': USER_AGENT,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'cs-CZ,cs;q=0.9,en;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'cs-CZ,cs;q=0.9,sk;q=0.8,en-US;q=0.7,en;q=0.6',
         'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
         'Upgrade-Insecure-Requests': '1',
         'Cache-Control': 'max-age=0',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Referer': origin,
     }
     try:
         connector = aiohttp.TCPConnector(ssl=False)
@@ -62,20 +90,22 @@ async def fetch_page_content(url: str, timeout: int = 15) -> Optional[str]:
                 url, headers=headers,
                 timeout=aiohttp.ClientTimeout(total=timeout),
                 allow_redirects=True,
-                max_redirects=5,
+                max_redirects=10,
             ) as response:
                 if response.status == 200:
-                    # Zkus detekovat encoding ze Content-Type
                     ct = response.headers.get('Content-Type', '')
                     enc = 'utf-8'
                     if 'charset=' in ct:
                         enc = ct.split('charset=')[-1].split(';')[0].strip() or 'utf-8'
                     return await response.text(encoding=enc, errors='replace')
+                elif response.status in (301, 302, 303, 307, 308):
+                    logger.warning(f"Redirect nesledován správně: {url} → {response.status}")
+                    return None
                 else:
                     logger.warning(f"HTTP {response.status} při načítání {url}")
                     return None
     except asyncio.TimeoutError:
-        logger.warning(f"Timeout: {url}")
+        logger.warning(f"Timeout ({timeout}s): {url}")
         return None
     except Exception as e:
         logger.error(f"Chyba při načítání {url}: {e}")
@@ -85,13 +115,35 @@ async def fetch_page_content(url: str, timeout: int = 15) -> Optional[str]:
 def _clean_price(raw: str) -> Optional[Decimal]:
     """Očisti řetězec ceny a převeď na Decimal. Vrátí None při chybě."""
     try:
-        cleaned = raw.replace('\xa0', '').replace(' ', '').replace(',', '.')
-        # Odstraň přebytečné desetinné tečky (jen první nech)
-        parts = cleaned.split('.')
-        if len(parts) > 2:
-            cleaned = parts[0] + '.' + ''.join(parts[1:])
+        # Odstraň mezery jako oddělovače tisíců (nbsp, narrow nbsp, normální mezera)
+        cleaned = raw.replace('\xa0', '').replace('\u202f', '').replace(' ', '')
+        # Odstraň non-numeric chars kromě čárky a tečky
+        cleaned = re.sub(r'[^\d.,]', '', cleaned)
+        if not cleaned:
+            return None
+        # Detekuj formát: pokud je čárka na poslední pozici před 2 čísly → desetinný oddělovač
+        # "399,00" → 399.00, "1.399,00" → 1399.00, "1,399.00" → 1399.00
+        if ',' in cleaned and '.' in cleaned:
+            # Oba oddělovače — urči který je tisícový a který desetinný
+            last_comma = cleaned.rfind(',')
+            last_dot = cleaned.rfind('.')
+            if last_comma > last_dot:
+                # "1.399,00" — tečka tisícová, čárka desetinná
+                cleaned = cleaned.replace('.', '').replace(',', '.')
+            else:
+                # "1,399.00" — čárka tisícová, tečka desetinná
+                cleaned = cleaned.replace(',', '')
+        elif ',' in cleaned:
+            # Zkontroluj: je čárka desetinný oddělovač nebo tisícový?
+            parts = cleaned.split(',')
+            if len(parts) == 2 and len(parts[1]) <= 2:
+                # "399,00" → desetinný oddělovač
+                cleaned = cleaned.replace(',', '.')
+            else:
+                # "1,399" → tisícový oddělovač
+                cleaned = cleaned.replace(',', '')
         val = Decimal(cleaned)
-        # Sanity check: 1 Kč – 99 999 Kč
+        # Sanity check: 1 – 99 999
         if Decimal('1') <= val <= Decimal('99999'):
             return val
     except Exception:
@@ -105,26 +157,36 @@ def _extract_from_json_ld(html: str) -> Optional[Decimal]:
                              html, re.DOTALL | re.IGNORECASE):
         try:
             data = json.loads(block)
-            # Může být list nebo dict
             items = data if isinstance(data, list) else [data]
+            # Flatten @graph
+            expanded = []
             for item in items:
-                # Flatten @graph
-                if '@graph' in item:
-                    items.extend(item['@graph'])
+                expanded.append(item)
+                if isinstance(item, dict) and '@graph' in item:
+                    expanded.extend(item['@graph'])
+
+            for item in expanded:
+                if not isinstance(item, dict):
+                    continue
                 t = item.get('@type', '')
                 if isinstance(t, list):
                     t = ' '.join(t)
-                if 'product' not in t.lower() and 'offer' not in t.lower():
-                    continue
-                # Najdi offers
-                offers = item.get('offers', item)
-                if isinstance(offers, list):
-                    offers = offers[0]
-                price_raw = offers.get('price') or offers.get('lowPrice')
-                if price_raw is not None:
-                    val = _clean_price(str(price_raw))
-                    if val:
-                        return val
+                t = t.lower()
+
+                # Přijmi Product, Offer, nebo cokoliv s offers
+                if 'product' in t or 'offer' in t or 'offers' in item:
+                    # Hledej v offers nebo přímo v item
+                    offers_raw = item.get('offers', item)
+                    offer_list = offers_raw if isinstance(offers_raw, list) else [offers_raw]
+                    for offer in offer_list:
+                        if not isinstance(offer, dict):
+                            continue
+                        for key in ('price', 'lowPrice', 'highPrice', 'Price'):
+                            price_raw = offer.get(key)
+                            if price_raw is not None:
+                                val = _clean_price(str(price_raw))
+                                if val:
+                                    return val
         except Exception:
             pass
     return None
