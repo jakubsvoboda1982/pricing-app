@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, Link2, Upload, Trash2, ExternalLink, Package, AlertCircle, TrendingDown, X, RefreshCw, CheckCircle } from 'lucide-react'
+import { Search, Plus, Link2, Upload, Trash2, ExternalLink, Package, AlertCircle, X, RefreshCw, CheckCircle, Globe, Play, ChevronDown } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { useNavigate } from 'react-router-dom'
 import { useMarketStore, shouldShowMarket } from '@/store/market'
@@ -27,12 +27,25 @@ interface LinkResult {
   not_found_list: { id: string; name: string }[]
 }
 
+interface Competitor {
+  id: string
+  name: string
+  url: string
+  market?: string
+}
+
 export default function ProductsPage() {
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [linkResult, setLinkResult] = useState<LinkResult | null>(null)
   const [linkLoading, setLinkLoading] = useState(false)
+  // Bulk competitor panel
+  const [bulkPanel, setBulkPanel] = useState<'competitor' | 'pipeline' | null>(null)
+  const [bulkCompetitorId, setBulkCompetitorId] = useState('')
+  const [bulkListingUrl, setBulkListingUrl] = useState('')
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; action: string } | null>(null)
+  const [bulkMsg, setBulkMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const selectedMarket = useMarketStore(state => state.selectedMarket)
@@ -41,6 +54,17 @@ export default function ProductsPage() {
     queryKey: ['products'],
     queryFn: () => apiClient.getProducts(),
   })
+
+  const { data: competitors = [] } = useQuery<Competitor[]>({
+    queryKey: ['competitors'],
+    queryFn: () => apiClient.getCompetitors(),
+  })
+
+  // Auto-fill listing URL when competitor changes
+  useEffect(() => {
+    const c = (competitors as Competitor[]).find(c => c.id === bulkCompetitorId)
+    if (c) setBulkListingUrl(c.url || '')
+  }, [bulkCompetitorId, competitors])
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiClient.deleteProduct(id),
@@ -70,6 +94,52 @@ export default function ProductsPage() {
     } finally {
       setLinkLoading(false)
     }
+  }
+
+  // Bulk: add competitor URL to each selected product
+  const handleBulkAddCompetitor = async () => {
+    if (!bulkCompetitorId) return
+    const competitor = (competitors as Competitor[]).find(c => c.id === bulkCompetitorId)
+    if (!competitor) return
+    const ids = [...selectedIds]
+    const url = bulkListingUrl.trim() || competitor.url
+    setBulkProgress({ done: 0, total: ids.length, action: 'Přidávám URL' })
+    setBulkMsg(null)
+    let done = 0; let errors = 0
+    for (const productId of ids) {
+      try {
+        await apiClient.addCompetitorUrl(productId, url, competitor.name, competitor.market || 'CZ')
+      } catch { errors++ }
+      done++
+      setBulkProgress({ done, total: ids.length, action: 'Přidávám URL' })
+    }
+    setBulkProgress(null)
+    setBulkMsg({ type: errors === 0 ? 'ok' : 'err', text: errors === 0 ? `✓ URL konkurenta přidáno k ${done} produktům.` : `Přidáno k ${done - errors}/${done}, ${errors} chyb.` })
+    queryClient.invalidateQueries({ queryKey: ['products'] })
+  }
+
+  // Bulk: run matching pipeline for each selected product
+  const handleBulkRunPipeline = async () => {
+    if (!bulkCompetitorId) return
+    const ids = [...selectedIds]
+    const listingUrls = bulkListingUrl.trim() ? [bulkListingUrl.trim()] : undefined
+    setBulkProgress({ done: 0, total: ids.length, action: 'Spouštím pipeline' })
+    setBulkMsg(null)
+    let done = 0; let errors = 0
+    for (const productId of ids) {
+      try {
+        await apiClient.runMatchingPipeline(productId, bulkCompetitorId, listingUrls)
+      } catch { errors++ }
+      done++
+      setBulkProgress({ done, total: ids.length, action: 'Spouštím pipeline' })
+    }
+    setBulkProgress(null)
+    setBulkMsg({
+      type: errors === 0 ? 'ok' : 'err',
+      text: errors === 0
+        ? `✓ Pipeline spuštěn pro ${done} produktů na pozadí. Výsledky v Párovacím centru.`
+        : `Spuštěno ${done - errors}/${done}, ${errors} selhalo.`
+    })
   }
 
   const allSelected = filtered.length > 0 && filtered.every(p => selectedIds.has(p.id))
@@ -438,26 +508,134 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* Bulk bar */}
+      {/* ── BULK BAR ─────────────────────────────────────────────────── */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-3 rounded-xl shadow-xl flex items-center gap-3 z-50 flex-wrap max-w-xl">
-          <span className="text-sm font-medium whitespace-nowrap">{selectedIds.size} produktů vybráno</span>
-          <button onClick={() => setSelectedIds(new Set())} className="text-xs text-gray-400 hover:text-white flex items-center gap-1">
-            <X size={12} /> Zrušit
-          </button>
-          <button
-            onClick={() => { handleBulkLink([...selectedIds]); setSelectedIds(new Set()) }}
-            disabled={linkLoading}
-            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
-            {linkLoading
-              ? <RefreshCw size={13} className="animate-spin" />
-              : <Link2 size={13} />}
-            Propojit s katalogem
-          </button>
-          <button onClick={() => { selectedIds.forEach(id => deleteMutation.mutate(id)); setSelectedIds(new Set()) }}
-            className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
-            <Trash2 size={13} /> Odebrat
-          </button>
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2" style={{ minWidth: 520 }}>
+
+          {/* Competitor panel — shown when bulkPanel is open */}
+          {bulkPanel && (
+            <div className="bg-white border border-gray-200 rounded-xl shadow-2xl p-4 w-full space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-gray-800">
+                  {bulkPanel === 'competitor' ? '🌐 Přidat URL konkurenta' : '▶ Spustit párování'}
+                  <span className="ml-2 text-xs font-normal text-gray-400">pro {selectedIds.size} produktů</span>
+                </p>
+                <button onClick={() => { setBulkPanel(null); setBulkMsg(null) }} className="text-gray-400 hover:text-gray-600"><X size={15} /></button>
+              </div>
+
+              {/* Competitor select */}
+              <div className="relative">
+                <select
+                  value={bulkCompetitorId}
+                  onChange={e => setBulkCompetitorId(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white pr-8"
+                >
+                  <option value="">— Vyber konkurenta —</option>
+                  {(competitors as Competitor[]).map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.url})</option>
+                  ))}
+                </select>
+                <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              </div>
+
+              {/* Listing / product URL */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">
+                  {bulkPanel === 'competitor' ? 'URL produktu u konkurenta (nebo homepage)' : 'Listing / kategorie URL pro discovery'}
+                </label>
+                <input
+                  type="url"
+                  value={bulkListingUrl}
+                  onChange={e => setBulkListingUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Progress / message */}
+              {bulkProgress && (
+                <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 rounded-lg px-3 py-2">
+                  <RefreshCw size={13} className="animate-spin flex-shrink-0" />
+                  <span>{bulkProgress.action}: {bulkProgress.done}/{bulkProgress.total}…</span>
+                </div>
+              )}
+              {bulkMsg && (
+                <div className={`text-sm rounded-lg px-3 py-2 ${bulkMsg.type === 'ok' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                  {bulkMsg.text}
+                </div>
+              )}
+
+              {/* Action button */}
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => { setBulkPanel(null); setBulkMsg(null) }}
+                  className="px-3 py-1.5 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
+                >
+                  Zavřít
+                </button>
+                {bulkPanel === 'competitor' ? (
+                  <button
+                    onClick={handleBulkAddCompetitor}
+                    disabled={!bulkCompetitorId || !!bulkProgress}
+                    className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
+                  >
+                    <Globe size={13} /> Přidat URL ke {selectedIds.size} produktům
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleBulkRunPipeline}
+                    disabled={!bulkCompetitorId || !!bulkProgress}
+                    className="flex items-center gap-1.5 px-4 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
+                  >
+                    <Play size={13} /> Spustit pro {selectedIds.size} produktů
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Main action strip */}
+          <div className="bg-gray-900 text-white px-5 py-3 rounded-xl shadow-xl flex items-center gap-3 w-full flex-wrap">
+            <span className="text-sm font-medium whitespace-nowrap">{selectedIds.size} produktů vybráno</span>
+            <button onClick={() => { setSelectedIds(new Set()); setBulkPanel(null); setBulkMsg(null) }}
+              className="text-xs text-gray-400 hover:text-white flex items-center gap-1">
+              <X size={12} /> Zrušit
+            </button>
+            <div className="flex-1" />
+
+            {/* Propojit s katalogem */}
+            <button
+              onClick={() => { handleBulkLink([...selectedIds]) }}
+              disabled={linkLoading}
+              className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
+              {linkLoading ? <RefreshCw size={13} className="animate-spin" /> : <Link2 size={13} />}
+              Propojit s katalogem
+            </button>
+
+            {/* Přidat konkurenci */}
+            <button
+              onClick={() => { setBulkPanel(p => p === 'competitor' ? null : 'competitor'); setBulkMsg(null) }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                bulkPanel === 'competitor' ? 'bg-blue-500 text-white' : 'bg-blue-700 hover:bg-blue-600 text-white'
+              }`}>
+              <Globe size={13} /> Přidat konkurenci
+            </button>
+
+            {/* Spustit párování */}
+            <button
+              onClick={() => { setBulkPanel(p => p === 'pipeline' ? null : 'pipeline'); setBulkMsg(null) }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                bulkPanel === 'pipeline' ? 'bg-green-500 text-white' : 'bg-green-700 hover:bg-green-600 text-white'
+              }`}>
+              <Play size={13} /> Spustit párování
+            </button>
+
+            {/* Odebrat */}
+            <button onClick={() => { selectedIds.forEach(id => deleteMutation.mutate(id)); setSelectedIds(new Set()); setBulkPanel(null) }}
+              className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
+              <Trash2 size={13} /> Odebrat
+            </button>
+          </div>
         </div>
       )}
     </div>
