@@ -176,19 +176,25 @@ function ConfirmedMatchesSection({ productId }: { productId: string }) {
   })
 
   const handleRunPipeline = async () => {
-    if (!pipelineCompetitorId.trim()) return
+    if (!pipelineCompetitorId) return
     setPipelineRunning(true)
     setPipelineMsg(null)
     try {
       const urls = pipelineListingUrl.trim() ? [pipelineListingUrl.trim()] : undefined
-      await apiClient.runMatchingPipeline(productId, pipelineCompetitorId.trim(), urls)
-      setPipelineMsg('Pipeline spuštěn na pozadí. Výsledky se objeví za chvíli.')
+      await apiClient.runMatchingPipeline(productId, pipelineCompetitorId, urls)
+      setPipelineMsg('✓ Pipeline spuštěn na pozadí. Výsledky se objeví za chvíli v záložce Párovací centrum.')
       setTimeout(() => {
         refetch()
         qc.invalidateQueries({ queryKey: ['product-matches-proposed', productId] })
       }, 5000)
     } catch (e: any) {
-      setPipelineMsg(`Chyba: ${e?.message ?? 'neznámá chyba'}`)
+      const raw: string = e?.message ?? 'neznámá chyba'
+      // Přeložíme technické chyby backendu do srozumitelného textu
+      if (raw.includes('canonical') || raw.includes('ingredient')) {
+        setPipelineMsg('⚠ Produkt nemá vyplněný profil pro párování. Propojte ho s Katalogem produktů nebo ho naimportujte z XML feedu — systém pak automaticky detekuje ingredienci a parametry.')
+      } else {
+        setPipelineMsg(`Chyba: ${raw}`)
+      }
     } finally {
       setPipelineRunning(false)
     }
@@ -282,9 +288,15 @@ function ConfirmedMatchesSection({ productId }: { productId: string }) {
             </div>
           </div>
           {pipelineMsg && (
-            <p className={`text-xs ${pipelineMsg.startsWith('Chyba') ? 'text-red-600' : 'text-green-700'}`}>
+            <div className={`text-xs rounded-lg px-3 py-2 ${
+              pipelineMsg.startsWith('✓')
+                ? 'bg-green-50 text-green-700 border border-green-200'
+                : pipelineMsg.startsWith('⚠')
+                ? 'bg-yellow-50 text-yellow-800 border border-yellow-200'
+                : 'bg-red-50 text-red-700 border border-red-200'
+            }`}>
               {pipelineMsg}
-            </p>
+            </div>
           )}
         </div>
       )}

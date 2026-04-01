@@ -50,7 +50,17 @@ export class APIClient {
     const response = await fetch(url, options)
 
     if (!response.ok) {
-      throw new Error(`API Error: ${response.status} ${response.statusText}`)
+      // Přečti detail chyby z JSON těla (FastAPI vrací { "detail": "..." })
+      try {
+        const errBody = await response.json()
+        const detail = errBody?.detail ?? errBody?.message ?? JSON.stringify(errBody)
+        throw new Error(String(detail))
+      } catch (parseErr) {
+        if (parseErr instanceof SyntaxError) {
+          throw new Error(`API Error: ${response.status} ${response.statusText}`)
+        }
+        throw parseErr
+      }
     }
 
     return response.json()
