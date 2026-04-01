@@ -134,7 +134,6 @@ export default function CatalogPage() {
       if (stockFilter === 'in_stock') params.append('in_stock', 'true')
       if (priceRange.min != null) params.append('min_price', String(priceRange.min))
       if (priceRange.max != null) params.append('max_price', String(priceRange.max))
-      params.append('limit', '2000')
       const qs = params.toString()
       const r = await fetch(`${API_BASE_URL}/catalog/products${qs ? `?${qs}` : ''}`)
       if (!r.ok) return []

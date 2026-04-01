@@ -206,32 +206,15 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
 # Endpointy: Katalog produktů
 # ---------------------------------------------------------------------------
 
-def _enrich_catalog_product(cp: CatalogProduct, db: Session) -> dict:
-    """Obohaď katalogový produkt o price_vat a linked watched product info."""
-    from app.models import Product as WatchedProduct
-
-    # Vypočítej cenu s DPH
-    price_vat = None
+def _build_price_vat(cp: CatalogProduct):
     if cp.price_without_vat is not None and cp.vat_rate is not None:
-        price_vat = cp.price_without_vat * (1 + cp.vat_rate / 100)
-    elif cp.price_without_vat is not None:
-        price_vat = cp.price_without_vat
+        return cp.price_without_vat * (1 + cp.vat_rate / 100)
+    return cp.price_without_vat
 
-    # Najdi linked watched product
-    watched = db.query(WatchedProduct).filter(
-        WatchedProduct.catalog_product_id == cp.id
-    ).first()
 
-    competitor_urls = None
-    watched_product_id = None
-    if watched:
-        watched_product_id = watched.id
-        raw_urls = watched.competitor_urls or []
-        competitor_urls = [
-            {"url": u.get("url", ""), "name": u.get("name", ""), "market": u.get("market", "CZ")}
-            for u in raw_urls if u.get("url")
-        ]
-
+def _serialize_catalog_product(cp: CatalogProduct, watched_map: dict) -> dict:
+    """Serialize catalog product using pre-fetched watched_map — no extra DB queries."""
+    watched_id, competitor_urls = watched_map.get(str(cp.id), (None, None))
     return {
         "id": cp.id,
         "name": cp.name,
@@ -239,7 +222,7 @@ def _enrich_catalog_product(cp: CatalogProduct, db: Session) -> dict:
         "category": cp.category,
         "manufacturer": cp.manufacturer,
         "price_without_vat": cp.price_without_vat,
-        "price_vat": price_vat,
+        "price_vat": _build_price_vat(cp),
         "purchase_price": cp.purchase_price,
         "vat_rate": cp.vat_rate,
         "quantity_in_stock": cp.quantity_in_stock,
@@ -249,10 +232,30 @@ def _enrich_catalog_product(cp: CatalogProduct, db: Session) -> dict:
         "url_reference": cp.url_reference,
         "imported_from": cp.imported_from,
         "is_active": cp.is_active,
-        "watched_product_id": watched_product_id,
+        "watched_product_id": watched_id,
         "competitor_urls": competitor_urls,
         "created_at": cp.created_at,
         "imported_at": cp.imported_at,
+    }
+
+
+def _enrich_catalog_product(cp: CatalogProduct, db: Session) -> dict:
+    """Single-product enrich (used by non-list endpoints)."""
+    from app.models import Product as WatchedProduct
+    watched = db.query(WatchedProduct).filter(
+        WatchedProduct.catalog_product_id == cp.id
+    ).first()
+    competitor_urls = None
+    watched_product_id = None
+    if watched:
+        watched_product_id = watched.id
+        raw_urls = watched.competitor_urls or []
+        competitor_urls = [
+            {"url": u.get("url", ""), "name": u.get("name", ""), "market": u.get("market", "CZ")}
+            for u in raw_urls if u.get("url")
+        ]
+    return _serialize_catalog_product.__wrapped__(cp) if False else {
+        **_serialize_catalog_product(cp, {str(cp.id): (watched_product_id, competitor_urls)}),
     }
 
 
@@ -267,20 +270,19 @@ def get_catalog_products(
     min_price: float = Query(None, description="Minimální cena s DPH"),
     max_price: float = Query(None, description="Maximální cena s DPH"),
     skip: int = 0,
-    limit: int = 2000,
+    limit: int = 1000,
 ):
     """Získej produkty z katalogu s filtrem a obohacenými daty"""
+    from app.models import Product as WatchedProduct
+
     query = db.query(CatalogProduct)
 
     if market:
         query = query.filter(CatalogProduct.market == market)
-
     if category:
         query = query.filter(CatalogProduct.category == category)
-
     if manufacturer:
         query = query.filter(CatalogProduct.manufacturer == manufacturer)
-
     if search:
         query = query.filter(
             CatalogProduct.name.ilike(f"%{search}%") |
@@ -288,12 +290,8 @@ def get_catalog_products(
             CatalogProduct.category.ilike(f"%{search}%") |
             CatalogProduct.manufacturer.ilike(f"%{search}%")
         )
-
     if in_stock is True:
         query = query.filter(CatalogProduct.quantity_in_stock > 0)
-
-    # Price filter: compare against price_without_vat * (1 + vat_rate/100)
-    # Use price_without_vat as a proxy since price_vat is computed
     if min_price is not None:
         query = query.filter(
             CatalogProduct.price_without_vat * (1 + CatalogProduct.vat_rate / 100) >= min_price
@@ -304,7 +302,28 @@ def get_catalog_products(
         )
 
     products = query.order_by(CatalogProduct.name).offset(skip).limit(limit).all()
-    return [CatalogProductResponse(**_enrich_catalog_product(p, db)) for p in products]
+
+    if not products:
+        return []
+
+    # Single batch query for all watched products — O(1) instead of O(N)
+    catalog_ids = [p.id for p in products]
+    watched_rows = db.query(
+        WatchedProduct.catalog_product_id,
+        WatchedProduct.id,
+        WatchedProduct.competitor_urls,
+    ).filter(WatchedProduct.catalog_product_id.in_(catalog_ids)).all()
+
+    watched_map: dict = {}
+    for row in watched_rows:
+        raw_urls = row.competitor_urls or []
+        competitor_urls = [
+            {"url": u.get("url", ""), "name": u.get("name", ""), "market": u.get("market", "CZ")}
+            for u in raw_urls if isinstance(u, dict) and u.get("url")
+        ]
+        watched_map[str(row.catalog_product_id)] = (row.id, competitor_urls)
+
+    return [CatalogProductResponse(**_serialize_catalog_product(p, watched_map)) for p in products]
 
 
 @router.get("/categories")
