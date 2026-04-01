@@ -4,6 +4,7 @@ from sqlalchemy import desc
 from app.database import get_db
 from app.schemas.product import ProductCreate, ProductUpdate, ProductResponse, PriceResponse, PriceCreate, CompetitorUrlItem
 from app.models import Product, Price, CatalogProduct, Company
+from app.middleware.auth import verify_token
 from uuid import UUID
 from pydantic import BaseModel
 from typing import Optional
@@ -246,7 +247,12 @@ def update_product(product_id: UUID, product_update: ProductUpdate, db: Session 
 
 
 @router.patch("/{product_id}/pricing", response_model=ProductResponse)
-def update_pricing(product_id: UUID, data: PricingUpdate, db: Session = Depends(get_db)):
+def update_pricing(
+    product_id: UUID,
+    data: PricingUpdate,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
     """Nastav nákupní cenu bez DPH, sazbu DPH a/nebo minimální cenu produktu."""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
