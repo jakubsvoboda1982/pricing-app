@@ -18,10 +18,14 @@ from .recommendation import PriceRecommendation
 from .watchlist import WatchedProduct
 from .hero import HeroScore
 from .seasonality import SeasonalityRule
+from .domain_crawl_state import DomainCrawlState
+from .competitor_candidate import CompetitorCandidate
+from .product_match import ProductMatch
 
 __all__ = [
     "Company", "User", "Product", "Price", "AuditLog", "Analytics", "LoginAttempt",
     "CatalogProduct", "Competitor", "CompetitorPrice", "CompetitorRank", "CompetitorAlert",
     "FeedSubscription", "CompetitorProductPrice", "CompetitorPriceHistory", "BaselinkerConfig",
-    "BaselinkerProductMatch", "PriceRecommendation", "WatchedProduct", "HeroScore", "SeasonalityRule"
+    "BaselinkerProductMatch", "PriceRecommendation", "WatchedProduct", "HeroScore", "SeasonalityRule",
+    "DomainCrawlState", "CompetitorCandidate", "ProductMatch",
 ]

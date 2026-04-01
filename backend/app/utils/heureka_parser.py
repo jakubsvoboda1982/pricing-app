@@ -2,6 +2,10 @@
 Heureka XML Feed Parser
 Supports both SHOPITEM (real Heureka CZ/SK format) and legacy ITEM format.
 Extracts PRICE_VAT as the selling price (price with VAT).
+
+Rozšíření: po parsování každé položky automaticky volá normalizer
+a přidává 'canonical_attributes', 'target_weight_g', 'must_have_terms',
+'should_have_terms', 'must_not_have_terms' do výsledného datu.
 """
 
 import xml.etree.ElementTree as ET
@@ -137,6 +141,34 @@ def _parse_item(item_elem: ET.Element, market: str) -> Tuple[Optional[Dict], Lis
     return data, errors
 
 
+def _enrich_with_canonical(data: dict) -> dict:
+    """
+    Volá normalizér a přidá canonical_attributes + matching profil do data dict.
+    Bezpečně – chyba v normalizéru nesmí zastavit import.
+    """
+    try:
+        from app.normalization.normalizer import build_product_profile
+        attrs, profile = build_product_profile(
+            name=data.get("name", ""),
+            category=data.get("category"),
+            manufacturer=data.get("manufacturer"),
+            description=data.get("description"),
+        )
+        data["canonical_attributes"] = attrs.to_dict()
+        data["target_weight_g"] = attrs.target_weight_g
+        data["must_have_terms"] = profile.must_have_terms
+        data["should_have_terms"] = profile.should_have_terms
+        data["must_not_have_terms"] = profile.must_not_have_terms
+    except Exception:
+        # Normalizace je best-effort – import pokračuje i bez ní
+        data.setdefault("canonical_attributes", {})
+        data.setdefault("target_weight_g", None)
+        data.setdefault("must_have_terms", [])
+        data.setdefault("should_have_terms", [])
+        data.setdefault("must_not_have_terms", [])
+    return data
+
+
 class HeureaFeedParser:
     """Parser pro Heureka XML feed – podporuje SHOPITEM i ITEM elementy."""
 
@@ -183,6 +215,7 @@ class HeureaFeedParser:
             if data:
                 data['market'] = market
                 data['imported_from'] = f'heureka_{market.lower()}'
+                _enrich_with_canonical(data)
                 products.append(data)
             if item_errors:
                 errors.append({'row': idx, 'ean': data.get('ean', 'N/A'), 'errors': item_errors})
@@ -217,6 +250,7 @@ class HeureaFeedParser:
             if data:
                 data['market'] = market
                 data['imported_from'] = f'heureka_{market.lower()}'
+                _enrich_with_canonical(data)
                 products.append(data)
             if item_errors:
                 errors.append({'row': idx, 'ean': data.get('ean', 'N/A'), 'errors': item_errors})

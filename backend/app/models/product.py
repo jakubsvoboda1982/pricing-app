@@ -1,6 +1,6 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, UniqueConstraint, Numeric, Integer
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, UniqueConstraint, Numeric, Integer, Boolean
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from sqlalchemy.dialects.postgresql import UUID, JSON, JSONB
 import uuid
 from app.database import Base
 
@@ -33,6 +33,18 @@ class Product(Base):
     manufacturing_cost = Column(Numeric(12, 2), nullable=True)  # Výrobní cena
     min_price = Column(Numeric(12, 2), nullable=True)        # Minimální prodejní cena
     stock_quantity = Column(Integer, nullable=True)           # Skladovost z Baselinker
+
+    # ── Canonical matching profil ─────────────────────────────────────────────
+    # Automaticky odvozeno z XML feedu, editovatelné v UI
+    canonical_attributes_json = Column(JSONB, default=dict, nullable=True)
+    # Příklad: {"ingredient": "cashew", "processing": ["roasted", "salted"], "flavor": [], ...}
+
+    target_weight_g = Column(Integer, nullable=True)                      # Cílová gramáž v g
+    weight_tolerance_percent = Column(Numeric(5, 2), default=20.0)        # Tolerance gramáže %
+    compare_by_unit_price = Column(Boolean, default=True)                 # Porovnávat per kg?
+    must_have_terms_json = Column(JSONB, default=list, nullable=True)     # ["cashew", "roasted"]
+    should_have_terms_json = Column(JSONB, default=list, nullable=True)   # ["1kg", "1000g"]
+    must_not_have_terms_json = Column(JSONB, default=list, nullable=True) # ["natural", "unsalted"]
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

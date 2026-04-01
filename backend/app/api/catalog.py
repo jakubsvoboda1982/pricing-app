@@ -88,6 +88,43 @@ def _sync_tracked_price(db: Session, catalog_product_id, price_vat, market: str)
             db.commit()
 
 
+def _sync_canonical_to_watched(
+    db: Session,
+    catalog_product_id,
+    canonical_attrs: dict,
+    target_weight_g,
+    must_have: list,
+    should_have: list,
+    must_not_have: list,
+) -> None:
+    """
+    Propaguje canonical matching profil z katalogu na linked Product záznamy.
+    Přepisuje pouze pokud Product ještě nemá vlastní (ručně upravený) profil.
+    """
+    if not canonical_attrs:
+        return
+    try:
+        from app.models import Product
+        tracked = db.query(Product).filter(
+            Product.catalog_product_id == catalog_product_id
+        ).all()
+        for product in tracked:
+            # Přepiš pouze pokud je profil prázdný (nebyl upraven ručně)
+            existing_attrs = product.canonical_attributes_json or {}
+            if not existing_attrs.get("ingredient"):
+                product.canonical_attributes_json = canonical_attrs
+                product.must_have_terms_json = must_have
+                product.should_have_terms_json = should_have
+                product.must_not_have_terms_json = must_not_have
+            # Gramáž vždy aktualizujeme z feedu (pokud ještě není nastavena)
+            if not product.target_weight_g and target_weight_g:
+                product.target_weight_g = target_weight_g
+        if tracked:
+            db.commit()
+    except Exception:
+        pass  # Best-effort
+
+
 def _find_existing_product(db: Session, ean: Optional[str], product_code: Optional[str], market: str, company_id) -> Optional[CatalogProduct]:
     """Najdi existující produkt podle EAN nebo PRODUCTNO"""
     if ean:
@@ -142,6 +179,10 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
 
                 existing = _find_existing_product(db, ean, product_code, feed_sub.market, company.id)
 
+                # Canonical profil z normalizéru (přišel z heureka_parser)
+                canonical_attrs = product_data.get('canonical_attributes', {})
+                target_weight_g = product_data.get('target_weight_g')
+
                 if existing and feed_sub.merge_existing:
                     existing.name = name
                     existing.category = product_data.get('category')
@@ -159,6 +200,13 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                     db.commit()
                     updated_count += 1
                     _sync_tracked_price(db, existing.id, price_vat, feed_sub.market)
+                    # Propaguj canonical profil na linked Products
+                    _sync_canonical_to_watched(
+                        db, existing.id, canonical_attrs, target_weight_g,
+                        product_data.get('must_have_terms', []),
+                        product_data.get('should_have_terms', []),
+                        product_data.get('must_not_have_terms', []),
+                    )
                 elif existing and not feed_sub.merge_existing:
                     skipped_count += 1
                 else:
@@ -185,6 +233,12 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                     db.commit()
                     imported_count += 1
                     _sync_tracked_price(db, catalog_product.id, price_vat, feed_sub.market)
+                    _sync_canonical_to_watched(
+                        db, catalog_product.id, canonical_attrs, target_weight_g,
+                        product_data.get('must_have_terms', []),
+                        product_data.get('should_have_terms', []),
+                        product_data.get('must_not_have_terms', []),
+                    )
             except Exception:
                 skipped_count += 1
                 continue

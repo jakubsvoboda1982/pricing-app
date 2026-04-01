@@ -253,6 +253,22 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
                 extra_data['_catalog_price_without_vat'] = cat_product.price_without_vat
                 extra_data['_catalog_vat_rate'] = cat_product.vat_rate
                 extra_data['_catalog_market'] = cat_product.market or 'CZ'
+                # Canonical profil: pokusíme se odvozit z dat katalogu
+                try:
+                    from app.normalization.normalizer import build_product_profile
+                    _attrs, _profile = build_product_profile(
+                        name=product.name or cat_product.name,
+                        category=cat_product.category,
+                        manufacturer=cat_product.manufacturer,
+                        description=cat_product.description,
+                    )
+                    extra_data['_canonical_attrs'] = _attrs.to_dict()
+                    extra_data['_target_weight_g'] = _attrs.target_weight_g
+                    extra_data['_must_have'] = _profile.must_have_terms
+                    extra_data['_should_have'] = _profile.should_have_terms
+                    extra_data['_must_not_have'] = _profile.must_not_have_terms
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -274,7 +290,13 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
         ean=extra_data.get('ean', product.ean),
         thumbnail_url=extra_data.get('thumbnail_url', product.thumbnail_url),
         url_reference=extra_data.get('url_reference', product.url_reference),
-        competitor_urls=[]
+        competitor_urls=[],
+        # Canonical matching profil z normalizéru
+        canonical_attributes_json=extra_data.get('_canonical_attrs', {}),
+        target_weight_g=extra_data.get('_target_weight_g'),
+        must_have_terms_json=extra_data.get('_must_have', []),
+        should_have_terms_json=extra_data.get('_should_have', []),
+        must_not_have_terms_json=extra_data.get('_must_not_have', []),
     )
     db.add(db_product)
     db.flush()  # get db_product.id before commit
