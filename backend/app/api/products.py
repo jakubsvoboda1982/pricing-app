@@ -271,6 +271,7 @@ def _enrich_with_price(
         'catalog_price_vat': catalog_price_vat,
         'catalog_quantity_in_stock': catalog_quantity_in_stock,
         'market_names': getattr(product, 'market_names_json', None) or {},
+        'stock_divisor': getattr(product, 'stock_divisor', None) or 1,
         'created_at': product.created_at,
         'updated_at': product.updated_at,
     }
@@ -492,6 +493,24 @@ def update_product(product_id: UUID, product_update: ProductUpdate, db: Session 
     db.commit()
     db.refresh(product)
     return ProductResponse(**_enrich_with_price(product, db))
+
+
+@router.patch("/{product_id}/stock-divisor")
+def update_stock_divisor(
+    product_id: UUID,
+    divisor: int,
+    db: Session = Depends(get_db),
+):
+    """Nastav koeficient pro přepočet skladovosti (stock_divisor)."""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Produkt nenalezen")
+    if divisor < 1:
+        raise HTTPException(status_code=422, detail="Koeficient musí být >= 1")
+    product.stock_divisor = divisor
+    db.commit()
+    db.refresh(product)
+    return {"stock_divisor": product.stock_divisor}
 
 
 @router.patch("/{product_id}/pricing", response_model=ProductResponse)

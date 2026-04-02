@@ -506,19 +506,18 @@ export default function ProductDetailPage() {
     if (!id) return
     setSavingDivisor(true)
     try {
-      const res = await fetch(`${API_BASE_URL}/products/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ stock_divisor: n }),
-      })
+      // Dedikovaný endpoint — žádná ambiguita s ostatními poli
+      const res = await fetch(
+        `${API_BASE_URL}/products/${id}/stock-divisor?divisor=${n}`,
+        { method: 'PATCH', headers: authHeaders() }
+      )
       if (!res.ok) {
-        alert(`Chyba při ukládání: ${res.status}`)
+        alert(`Chyba při ukládání koeficientu: ${res.status}`)
         return
       }
-      // Nastavíme stav PŘED invalidací, aby useEffect viděl správnou hodnotu z DB
+      // Aktualizuj lokální stav + cache přímo (bez refetche, který by mohl vrátit starou hodnotu)
       setStockDivisorState(n)
       setDivisorInput(String(n))
-      // Aktualizujeme cache přímo bez triggeru useEffect
       queryClient.setQueryData(['product', id], (old: any) =>
         old ? { ...old, stock_divisor: n } : old
       )
