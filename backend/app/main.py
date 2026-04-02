@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.config import get_settings
 from app.database import Base, engine, SessionLocal
@@ -168,6 +169,25 @@ def _ensure_schema():
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_divisor INTEGER DEFAULT 1",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_hash VARCHAR",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_expires_at TIMESTAMP WITH TIME ZONE",
+        # Fix wrong FK in competitor_price_history: was referencing old table name "competitor_prices"
+        # Drop old constraint (if exists) and recreate pointing to competitor_product_prices
+        """DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.table_constraints
+                WHERE table_name='competitor_price_history'
+                AND constraint_type='FOREIGN KEY'
+                AND constraint_name LIKE '%competitor_prices%'
+            ) THEN
+                ALTER TABLE competitor_price_history
+                    DROP CONSTRAINT IF EXISTS competitor_price_history_competitor_price_id_fkey;
+                ALTER TABLE competitor_price_history
+                    ADD CONSTRAINT competitor_price_history_competitor_price_id_fkey
+                    FOREIGN KEY (competitor_price_id)
+                    REFERENCES competitor_product_prices(id)
+                    ON DELETE CASCADE;
+            END IF;
+        END$$""",
     ]
     try:
         with engine.connect() as conn:
@@ -198,6 +218,20 @@ app.add_middleware(
     expose_headers=["*"],
     max_age=3600,
 )
+
+# Ensure CORS headers are present even on unhandled 500 errors
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    origin = request.headers.get("origin", "")
+    headers = {}
+    if origin in settings.ALLOWED_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Interní chyba serveru"},
+        headers=headers,
+    )
 
 # Include routers
 app.include_router(auth.router)

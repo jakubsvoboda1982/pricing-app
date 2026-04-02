@@ -133,24 +133,27 @@ async def refresh_competitor_prices(
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
     # Sync: vytvoř tracking záznamy pro všechny competitor_urls, které ještě nemají
-    for url_item in (product.competitor_urls or []):
-        url = url_item.get('url') if isinstance(url_item, dict) else url_item
-        if not url:
-            continue
-        existing = db.query(CompetitorProductPrice).filter(
-            CompetitorProductPrice.product_id == product_id,
-            CompetitorProductPrice.competitor_url == url,
-        ).first()
-        if not existing:
-            market = url_item.get('market', 'CZ') if isinstance(url_item, dict) else 'CZ'
-            db.add(CompetitorProductPrice(
-                product_id=product_id,
-                competitor_url=url,
-                currency="CZK" if market == "CZ" else "EUR",
-                market=market,
-                fetch_status="pending",
-            ))
-    db.commit()
+    try:
+        for url_item in (product.competitor_urls or []):
+            url = url_item.get('url') if isinstance(url_item, dict) else url_item
+            if not url:
+                continue
+            existing = db.query(CompetitorProductPrice).filter(
+                CompetitorProductPrice.product_id == product_id,
+                CompetitorProductPrice.competitor_url == url,
+            ).first()
+            if not existing:
+                market = url_item.get('market', 'CZ') if isinstance(url_item, dict) else 'CZ'
+                db.add(CompetitorProductPrice(
+                    product_id=product_id,
+                    competitor_url=url,
+                    currency="CZK" if market == "CZ" else "EUR",
+                    market=market,
+                    fetch_status="pending",
+                ))
+        db.commit()
+    except Exception:
+        db.rollback()  # ignore sync errors, continue with existing records
 
     comp_prices = db.query(CompetitorProductPrice).filter(
         CompetitorProductPrice.product_id == product_id
@@ -168,11 +171,12 @@ async def refresh_competitor_prices(
 
             if price is not None:
                 # Store historical record
-                history = CompetitorPriceHistory(
-                    competitor_price_id=comp_price.id,
-                    price=comp_price.price if comp_price.price else price
-                )
-                db.add(history)
+                if comp_price.price is not None:
+                    history = CompetitorPriceHistory(
+                        competitor_price_id=comp_price.id,
+                        price=comp_price.price
+                    )
+                    db.add(history)
 
                 # Update current price
                 comp_price.price = price
@@ -188,17 +192,22 @@ async def refresh_competitor_prices(
                 comp_price.next_update_at = datetime.utcnow() + timedelta(days=1)
                 errors.append(comp_price.competitor_url)
 
+            db.commit()
+
         except Exception as e:
-            comp_price.fetch_status = 'error'
-            comp_price.fetch_error = str(e)
-            comp_price.last_fetched_at = datetime.utcnow()
-            comp_price.next_update_at = datetime.utcnow() + timedelta(days=1)
+            db.rollback()
+            try:
+                comp_price.fetch_status = 'error'
+                comp_price.fetch_error = str(e)[:490]
+                comp_price.last_fetched_at = datetime.utcnow()
+                comp_price.next_update_at = datetime.utcnow() + timedelta(days=1)
+                db.commit()
+            except Exception:
+                db.rollback()
             errors.append(comp_price.competitor_url)
             logger.error(f"Error refreshing {comp_price.competitor_url}: {str(e)}")
 
         await asyncio.sleep(0.5)
-
-    db.commit()
 
     return {
         "status": "success" if not errors else "partial",
@@ -341,10 +350,14 @@ async def refresh_single_url(
             comp_price.last_fetched_at = datetime.utcnow()
         db.commit()
     except Exception as e:
-        comp_price.fetch_status = "error"
-        comp_price.fetch_error = str(e)
-        comp_price.last_fetched_at = datetime.utcnow()
-        db.commit()
+        db.rollback()
+        try:
+            comp_price.fetch_status = "error"
+            comp_price.fetch_error = str(e)[:490]
+            comp_price.last_fetched_at = datetime.utcnow()
+            db.commit()
+        except Exception:
+            db.rollback()
 
     return {
         "ok": True,

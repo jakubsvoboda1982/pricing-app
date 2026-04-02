@@ -43,7 +43,7 @@ class CompetitorPriceHistory(Base):
     __tablename__ = "competitor_price_history"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    competitor_price_id = Column(UUID(as_uuid=True), ForeignKey("competitor_prices.id", ondelete="CASCADE"), nullable=False, index=True)
+    competitor_price_id = Column(UUID(as_uuid=True), ForeignKey("competitor_product_prices.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Price at this point in time
     price = Column(Numeric(12, 2), nullable=False)
