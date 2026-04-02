@@ -83,6 +83,7 @@ class MatchResponse(BaseModel):
     product_name: Optional[str] = None
     competitor_id: str
     competitor_name: Optional[str] = None
+    competitor_market: Optional[str] = "CZ"
     candidate_id: Optional[str] = None
     candidate_name: Optional[str] = None
     candidate_url: Optional[str] = None
@@ -151,6 +152,7 @@ def _enrich_match_response(match: ProductMatch, db: Session) -> dict:
         "product_name": product.name if product else None,
         "competitor_id": str(match.competitor_id),
         "competitor_name": competitor.name if competitor else None,
+        "competitor_market": competitor.market if competitor else "CZ",
         "candidate_id": str(match.candidate_id) if match.candidate_id else None,
         "candidate_name": candidate.product_name_raw if candidate else None,
         "candidate_url": candidate.discovered_url if candidate else None,
@@ -248,6 +250,7 @@ def list_matches(
     competitor_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None, description="proposed|auto_approved|manually_approved|rejected|inactive"),
     grade: Optional[str] = Query(None, description="A|B|C|X"),
+    market: Optional[str] = Query(None, description="CZ|SK|HU — filtruje dle trhu konkurenta"),
     is_active: Optional[bool] = Query(True),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -267,6 +270,10 @@ def list_matches(
         q = q.filter(ProductMatch.match_grade == grade)
     if is_active is not None:
         q = q.filter(ProductMatch.is_active == is_active)
+    if market:
+        # Filtruj dle trhu konkurenta — JOIN přes competitor_id
+        q = q.join(Competitor, ProductMatch.competitor_id == Competitor.id)\
+             .filter(Competitor.market == market)
 
     q = q.order_by(ProductMatch.match_confidence_score.desc().nullslast())
     matches = q.offset(skip).limit(limit).all()
@@ -527,6 +534,7 @@ def rescore_matches(
 def get_match_stats(
     product_id: Optional[str] = Query(None),
     competitor_id: Optional[str] = Query(None),
+    market: Optional[str] = Query(None, description="CZ|SK|HU — filtruje dle trhu konkurenta"),
     db: Session = Depends(get_db),
     _token=Depends(verify_token),
 ):
@@ -537,6 +545,9 @@ def get_match_stats(
         q = q.filter(ProductMatch.product_id == product_id)
     if competitor_id:
         q = q.filter(ProductMatch.competitor_id == competitor_id)
+    if market:
+        q = q.join(Competitor, ProductMatch.competitor_id == Competitor.id)\
+             .filter(Competitor.market == market)
 
     rows = q.group_by(ProductMatch.match_status).all()
 

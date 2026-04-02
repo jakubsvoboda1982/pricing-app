@@ -428,6 +428,7 @@ export class APIClient {
     competitor_id?: string
     status?: string
     grade?: string
+    market?: string
     is_active?: boolean
     skip?: number
     limit?: number
@@ -437,6 +438,7 @@ export class APIClient {
     if (params?.competitor_id) p.set('competitor_id', params.competitor_id)
     if (params?.status) p.set('status', params.status)
     if (params?.grade) p.set('grade', params.grade)
+    if (params?.market) p.set('market', params.market)
     if (params?.is_active !== undefined) p.set('is_active', String(params.is_active))
     if (params?.skip !== undefined) p.set('skip', String(params.skip))
     if (params?.limit !== undefined) p.set('limit', String(params.limit))
@@ -471,10 +473,11 @@ export class APIClient {
     return this.request('PATCH', `/matching/candidates/${candidateId}/url`, { url })
   }
 
-  async getMatchStats(params?: { product_id?: string; competitor_id?: string }) {
+  async getMatchStats(params?: { product_id?: string; competitor_id?: string; market?: string }) {
     const p = new URLSearchParams()
     if (params?.product_id) p.set('product_id', params.product_id)
     if (params?.competitor_id) p.set('competitor_id', params.competitor_id)
+    if (params?.market) p.set('market', params.market)
     const qs = p.toString()
     return this.request('GET', `/matching/stats${qs ? `?${qs}` : ''}`)
   }

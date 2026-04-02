@@ -33,6 +33,7 @@ interface Match {
   product_name: string | null
   competitor_id: string
   competitor_name: string | null
+  competitor_market: string | null
   candidate_id: string | null
   candidate_name: string | null
   candidate_url: string | null
@@ -316,6 +317,15 @@ function MatchCard({ match, onReload }: { match: Match; onReload: () => void }) 
               <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
                 {match.competitor_name ?? '—'}
               </span>
+              {match.competitor_market && (
+                <span className={`px-1.5 py-0.5 rounded font-medium ${
+                  match.competitor_market === 'SK' ? 'bg-purple-50 text-purple-600' :
+                  match.competitor_market === 'HU' ? 'bg-orange-50 text-orange-600' :
+                  'bg-blue-50 text-blue-600'
+                }`}>
+                  {match.competitor_market === 'CZ' ? '🇨🇿' : match.competitor_market === 'SK' ? '🇸🇰' : '🇭🇺'} {match.competitor_market}
+                </span>
+              )}
               {match.candidate_price != null && (
                 <span className="font-medium text-gray-700">
                   {fmt(match.candidate_price, 0)} CZK
@@ -487,20 +497,22 @@ export default function MatchReviewPage() {
   const [statusFilter, setStatusFilter] = useState<string>('proposed')
   const [searchText, setSearchText] = useState('')
   const [gradeFilter, setGradeFilter] = useState<string>('')
+  const [marketFilter, setMarketFilter] = useState<string>('') // '' = Vše, 'CZ', 'SK'
 
   // Stats
   const { data: stats } = useQuery<MatchStats>({
-    queryKey: ['match-stats'],
-    queryFn: () => apiClient.getMatchStats(),
+    queryKey: ['match-stats', marketFilter],
+    queryFn: () => apiClient.getMatchStats({ market: marketFilter || undefined } as any),
     refetchInterval: 15000,
   })
 
   // Matches
   const { data: matches = [], isLoading, refetch } = useQuery<Match[]>({
-    queryKey: ['matches', statusFilter, gradeFilter],
+    queryKey: ['matches', statusFilter, gradeFilter, marketFilter],
     queryFn: () => apiClient.getMatches({
       status: statusFilter || undefined,
       grade: gradeFilter || undefined,
+      market: marketFilter || undefined,
       limit: 100,
     }),
     refetchInterval: 20000,
@@ -571,6 +583,24 @@ export default function MatchReviewPage() {
 
       {/* Filters */}
       <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
+
+        {/* Market tabs */}
+        <div className="flex gap-1">
+          {([
+            { value: '',   label: 'Vše' },
+            { value: 'CZ', label: '🇨🇿 CZ' },
+            { value: 'SK', label: '🇸🇰 SK' },
+          ] as const).map(m => (
+            <button key={m.value} onClick={() => setMarketFilter(m.value)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                marketFilter === m.value ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="h-4 w-px bg-gray-200" />
 
         {/* Status tabs */}
         <div className="flex gap-1 flex-wrap">
