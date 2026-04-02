@@ -477,6 +477,9 @@ export default function ProductDetailPage() {
   const [manualPriceInput, setManualPriceInput] = useState('')
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null)
   const [historyData, setHistoryData] = useState<Record<string, PriceHistoryEntry[]>>({})
+  const [stockDivisor, setStockDivisor] = useState(1)
+  const [editingDivisor, setEditingDivisor] = useState(false)
+  const [divisorInput, setDivisorInput] = useState('1')
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
@@ -832,6 +835,12 @@ export default function ProductDetailPage() {
               {activeMarket !== 'CZ' && ourPriceCzk != null && (
                 <p className="text-xs text-gray-400 mt-0.5">{ourPriceCzk.toLocaleString('cs-CZ', { maximumFractionDigits: 0 })} CZK</p>
               )}
+              {/* Kurz přepočtu — zobrazit jen pro non-CZK trhy */}
+              {activeCurrency !== 'CZK' && (
+                <p className="text-xs text-blue-400 mt-1 font-medium">
+                  1 {activeCurrency} = {EXCHANGE[activeCurrency].toLocaleString('cs-CZ')} CZK
+                </p>
+              )}
               {marketPriceRecord?.old_price != null && (
                 <p className="text-xs text-gray-400 line-through mt-1">
                   {Number(marketPriceRecord.old_price).toLocaleString(
@@ -910,32 +919,62 @@ export default function ProductDetailPage() {
         {/* Skladem */}
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Skladem</p>
-          {product.stock_quantity != null ? (
-            <>
-              <p className={`text-2xl font-bold leading-none ${
-                product.stock_quantity > 10 ? 'text-green-700'
-                : product.stock_quantity > 0 ? 'text-yellow-600' : 'text-red-600'
-              }`}>{product.stock_quantity}</p>
-              <p className="text-sm text-gray-400 mt-0.5">ks · Baselinker</p>
-              <p className="text-xs text-gray-400 mt-1">
-                {product.stock_quantity > 10 ? 'Dostatek' : product.stock_quantity > 0 ? 'Docházející' : 'Vyprodáno'}
-              </p>
-              {product.catalog_quantity_in_stock != null && (
-                <p className="text-xs text-gray-400 mt-1">Katalog: {product.catalog_quantity_in_stock} ks</p>
-              )}
-            </>
-          ) : product.catalog_quantity_in_stock != null ? (
-            <>
-              <p className={`text-2xl font-bold leading-none ${
-                product.catalog_quantity_in_stock > 10 ? 'text-green-700'
-                : product.catalog_quantity_in_stock > 0 ? 'text-yellow-600' : 'text-red-600'
-              }`}>{product.catalog_quantity_in_stock}</p>
-              <p className="text-sm text-gray-400 mt-0.5">ks · katalog</p>
-              <p className="text-xs text-indigo-500 mt-1">z XML feedu</p>
-            </>
-          ) : (
-            <p className="text-sm text-gray-400 mt-1">Nepropojeno</p>
-          )}
+          {(() => {
+            const rawQty = product.stock_quantity ?? product.catalog_quantity_in_stock
+            const fromBl = product.stock_quantity != null
+            if (rawQty == null) return <p className="text-sm text-gray-400 mt-1">Nepropojeno</p>
+            const displayQty = Math.floor(rawQty / stockDivisor)
+            const colorClass = displayQty > 10 ? 'text-green-700' : displayQty > 0 ? 'text-yellow-600' : 'text-red-600'
+            return (
+              <>
+                <p className={`text-2xl font-bold leading-none ${colorClass}`}>{displayQty}</p>
+                <p className="text-sm text-gray-400 mt-0.5">
+                  ks · {fromBl ? 'Baselinker' : 'katalog'}
+                  {stockDivisor > 1 && (
+                    <span className="ml-1 text-xs text-blue-500">(÷{stockDivisor}, raw: {rawQty})</span>
+                  )}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {displayQty > 10 ? 'Dostatek' : displayQty > 0 ? 'Docházející' : 'Vyprodáno'}
+                </p>
+                {/* Divisor editor */}
+                {editingDivisor ? (
+                  <div className="mt-2 flex items-center gap-1">
+                    <span className="text-xs text-gray-400">÷</span>
+                    <input
+                      type="number" min={1} value={divisorInput}
+                      onChange={e => setDivisorInput(e.target.value)}
+                      className="w-14 text-xs border border-gray-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          const n = parseInt(divisorInput)
+                          if (n >= 1) setStockDivisor(n)
+                          setEditingDivisor(false)
+                        }
+                        if (e.key === 'Escape') setEditingDivisor(false)
+                      }}
+                    />
+                    <button onClick={() => {
+                      const n = parseInt(divisorInput)
+                      if (n >= 1) setStockDivisor(n)
+                      setEditingDivisor(false)
+                    }} className="text-xs text-blue-600 hover:underline">OK</button>
+                    <button onClick={() => setEditingDivisor(false)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setDivisorInput(String(stockDivisor)); setEditingDivisor(true) }}
+                    className="mt-2 text-xs text-gray-400 hover:text-blue-600 transition flex items-center gap-0.5">
+                    {stockDivisor > 1 ? `÷${stockDivisor} · změnit` : '÷ Rozdělit'}
+                  </button>
+                )}
+                {!fromBl && product.catalog_quantity_in_stock != null && product.stock_quantity != null && (
+                  <p className="text-xs text-gray-400 mt-1">Katalog: {Math.floor(product.catalog_quantity_in_stock / stockDivisor)} ks</p>
+                )}
+              </>
+            )
+          })()}
         </div>
 
         {/* Hero skóre */}
@@ -1103,6 +1142,10 @@ export default function ProductDetailPage() {
                 value: purchasePriceWithoutVat,
                 valueStr: purchasePriceWithoutVat != null ? `${fmt(purchasePriceWithoutVat)} CZK` : null,
                 sub: purchasePriceWithVat != null ? `DPH ${fmt(purchaseVatRate, 0)} % → ${fmt(purchasePriceWithVat)} CZK` : null,
+                // Přepočet do měny aktivního trhu
+                mktConv: (activeCurrency !== 'CZK' && purchasePriceWithVat != null)
+                  ? `= ${(purchasePriceWithVat / EXCHANGE[activeCurrency]).toLocaleString(activeMarket === 'SK' ? 'sk-SK' : 'cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${activeCurrency}`
+                  : null,
                 onClear: () => setPricingMutation.mutate({ clear_purchase_price: true }),
               },
               {
@@ -1111,6 +1154,9 @@ export default function ProductDetailPage() {
                 value: manufacturingCost,
                 valueStr: manufacturingCost != null ? `${fmt(manufacturingCost)} CZK` : null,
                 sub: manufacturingCostWithVat != null ? `DPH ${fmt(purchaseVatRate, 0)} % → ${fmt(manufacturingCostWithVat)} CZK` : null,
+                mktConv: (activeCurrency !== 'CZK' && manufacturingCostWithVat != null)
+                  ? `= ${(manufacturingCostWithVat / EXCHANGE[activeCurrency]).toLocaleString(activeMarket === 'SK' ? 'sk-SK' : 'cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${activeCurrency}`
+                  : null,
                 onClear: () => setPricingMutation.mutate({ clear_manufacturing_cost: true }),
               },
             ].map((row, i) => (
@@ -1121,6 +1167,7 @@ export default function ProductDetailPage() {
                     <div className="text-right">
                       <span className="text-sm font-semibold text-gray-800">{row.valueStr}</span>
                       {row.sub && <p className="text-xs text-gray-400">{row.sub}</p>}
+                      {row.mktConv && <p className="text-xs text-blue-500 font-medium">{row.mktConv}</p>}
                     </div>
                   ) : (
                     <span className="text-xs text-gray-400 italic">Nenastaveno</span>
