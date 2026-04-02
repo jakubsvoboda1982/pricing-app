@@ -50,6 +50,7 @@ interface Product {
   manufacturer?: string | null
   catalog_price_vat?: number | null
   catalog_quantity_in_stock?: number | null
+  market_names?: Record<string, string>
   created_at: string
 }
 
@@ -666,16 +667,39 @@ export default function ProductDetailPage() {
 
   // ── Multi-market ──────────────────────────────────────────────────────────
   const availableMarkets = [...new Set(competitorUrls.map(u => u.market).filter(Boolean))]
+  // Also add markets that have a Price record from a feed (e.g. SK feed imported)
+  ;(prices as PriceRecord[]).forEach(p => {
+    if (p.market && !availableMarkets.includes(p.market)) availableMarkets.push(p.market)
+  })
   if (availableMarkets.length === 0 && product.market) availableMarkets.push(product.market)
   if (!availableMarkets.includes('CZ') && !availableMarkets.includes('SK')) availableMarkets.unshift('CZ')
   const activeMarket = viewMarket ?? product.market ?? availableMarkets[0] ?? 'CZ'
   const activeCurrency = MARKET_CURRENCY[activeMarket] ?? 'CZK'
+
+  // Display name: use feed name for active market when available
+  const displayName = (activeMarket !== 'CZ' && product.market_names?.[activeMarket])
+    ? product.market_names[activeMarket]
+    : product.name
 
   // Filter competitor URLs and prices to active market
   const filteredUrls = competitorUrls.filter(u => (u.market || 'CZ') === activeMarket)
   const filteredPrices = (competitorPrices as CompetitorPriceRecord[]).filter(
     cp => filteredUrls.some(u => u.url === cp.competitor_url)
   )
+
+  // Our price in the active market:
+  // For non-CZ markets, prefer a Price record stored in native currency from the feed
+  const marketPriceRecord = (prices as PriceRecord[])
+    .filter(p => p.market === activeMarket)
+    .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())[0]
+  // ourPriceInMarket: native currency (EUR for SK, HUF for HU, CZK for CZ)
+  const ourPriceInMarket = marketPriceRecord != null
+    ? Number(marketPriceRecord.current_price)
+    : currentPrice != null ? toMarket(currentPrice, activeMarket) : null
+  // Convert back to CZK for margin calculations
+  const ourPriceCzk = marketPriceRecord != null
+    ? Number(marketPriceRecord.current_price) * (EXCHANGE[marketPriceRecord.currency ?? 'CZK'] ?? 1)
+    : currentPrice
 
   // Lowest competitor price in CZK, then converted for display
   const lowestCompCzk = (() => {
@@ -689,8 +713,6 @@ export default function ProductDetailPage() {
   })()
   const lowestComp = lowestCompCzk // kept in CZK for margin calc
 
-  // Our price in the active market currency
-  const ourPriceInMarket = currentPrice != null ? toMarket(currentPrice, activeMarket) : null
   const lowestCompInMarket = lowestCompCzk != null ? toMarket(lowestCompCzk, activeMarket) : null
 
   // Hero score breakdown
@@ -723,7 +745,7 @@ export default function ProductDetailPage() {
           <ArrowLeft size={15} />
           <span>Produkty</span>
           <span className="text-gray-300">/</span>
-          <span className="text-gray-900 font-medium truncate max-w-xs">{product.name}</span>
+          <span className="text-gray-900 font-medium truncate max-w-xs">{displayName}</span>
         </button>
         {product.url_reference && (
           <a href={product.url_reference} target="_blank" rel="noopener noreferrer"
@@ -745,7 +767,7 @@ export default function ProductDetailPage() {
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-bold text-gray-900 leading-tight">{product.name}</h1>
+          <h1 className="text-xl font-bold text-gray-900 leading-tight">{displayName}</h1>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <span className="text-xs font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded">SKU: {product.sku}</span>
             {product.product_code && (
@@ -797,21 +819,24 @@ export default function ProductDetailPage() {
         {/* Aktuální cena */}
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Aktuální cena</p>
-          {currentPrice != null ? (
+          {ourPriceInMarket != null ? (
             <>
               <p className="text-2xl font-bold text-blue-700 leading-none">
-                {toMarket(currentPrice, activeMarket).toLocaleString(
+                {ourPriceInMarket.toLocaleString(
                   activeMarket === 'SK' ? 'sk-SK' : activeMarket === 'HU' ? 'hu-HU' : 'cs-CZ',
                   { minimumFractionDigits: activeMarket === 'CZ' ? 0 : 2, maximumFractionDigits: activeMarket === 'CZ' ? 0 : 2 }
                 )}
               </p>
               <p className="text-sm text-gray-400 mt-0.5">{activeCurrency}</p>
-              {activeMarket !== 'CZ' && (
-                <p className="text-xs text-gray-400 mt-0.5">{currentPrice.toLocaleString('cs-CZ')} CZK</p>
+              {activeMarket !== 'CZ' && ourPriceCzk != null && (
+                <p className="text-xs text-gray-400 mt-0.5">{ourPriceCzk.toLocaleString('cs-CZ', { maximumFractionDigits: 0 })} CZK</p>
               )}
-              {product.old_price != null && (
+              {marketPriceRecord?.old_price != null && (
                 <p className="text-xs text-gray-400 line-through mt-1">
-                  {fmtMkt(Number(product.old_price), activeMarket)}
+                  {Number(marketPriceRecord.old_price).toLocaleString(
+                    activeMarket === 'SK' ? 'sk-SK' : 'cs-CZ',
+                    { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                  )} {activeCurrency}
                 </p>
               )}
             </>

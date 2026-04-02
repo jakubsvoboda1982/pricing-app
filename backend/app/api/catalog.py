@@ -125,6 +125,54 @@ def _sync_canonical_to_watched(
         pass  # Best-effort
 
 
+def _sync_by_ean(db: Session, ean: Optional[str], name: Optional[str], price_vat, market: str, company_id) -> None:
+    """
+    Pro produkty sledované s daným EAN (bez ohledu na catalog_product_id):
+    - Vytvoří/aktualizuje Price záznam pro daný trh
+    - Uloží název produktu z feedu do market_names_json[market]
+    Toto umožňuje zobrazit SK/HU název a cenu z feedu pro CZ produkt.
+    """
+    if not ean:
+        return
+    try:
+        from app.models import Product, Price
+        from sqlalchemy import desc
+        tracked = db.query(Product).filter(
+            Product.ean == ean,
+            Product.company_id == company_id,
+        ).all()
+        for product in tracked:
+            # Aktualizuj název z feedu pro daný trh
+            if name:
+                names = dict(product.market_names_json or {})
+                names[market] = name
+                product.market_names_json = names
+            # Synchronizuj cenu pro daný trh
+            if price_vat is not None:
+                currency = 'CZK' if market == 'CZ' else ('EUR' if market == 'SK' else 'HUF')
+                latest = db.query(Price).filter(
+                    Price.product_id == product.id,
+                    Price.market == market,
+                ).order_by(desc(Price.changed_at)).first()
+                if latest:
+                    if latest.current_price != price_vat:
+                        latest.old_price = latest.current_price
+                        latest.current_price = price_vat
+                        latest.currency = currency
+                else:
+                    new_price = Price(
+                        product_id=product.id,
+                        market=market,
+                        currency=currency,
+                        current_price=price_vat,
+                    )
+                    db.add(new_price)
+        if tracked:
+            db.commit()
+    except Exception:
+        pass  # Best-effort
+
+
 def _find_existing_product(db: Session, ean: Optional[str], product_code: Optional[str], market: str, company_id) -> Optional[CatalogProduct]:
     """Najdi existující produkt podle EAN nebo PRODUCTNO"""
     if ean:
@@ -239,6 +287,10 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                         product_data.get('should_have_terms', []),
                         product_data.get('must_not_have_terms', []),
                     )
+
+                # Synchronizuj název a cenu dle EAN pro sledované produkty v jiných trzích
+                # (např. SK feed aktualizuje SK cenu/název u produktu sledovaného v CZ)
+                _sync_by_ean(db, ean, name, price_vat, feed_sub.market, company.id)
             except Exception:
                 skipped_count += 1
                 continue

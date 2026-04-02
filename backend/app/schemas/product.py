@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
@@ -93,6 +93,8 @@ class ProductResponse(BaseModel):
     manufacturer: Optional[str] = None
     catalog_price_vat: Optional[Decimal] = None   # Katalogová cena s DPH (price_without_vat * (1 + vat_rate/100))
     catalog_quantity_in_stock: Optional[int] = None  # Sklad z katalogu (XML feedu)
+    # Názvy produktu z XML feedů v jiných trzích: {"SK": "Kešu ořechy 1kg SK", "HU": "..."}
+    market_names: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

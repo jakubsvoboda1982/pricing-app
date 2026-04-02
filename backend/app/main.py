@@ -159,6 +159,23 @@ def _ensure_indexes():
 
 _ensure_indexes()
 
+
+# Apply idempotent schema migrations (ADD COLUMN IF NOT EXISTS)
+def _ensure_schema():
+    from sqlalchemy import text
+    stmts = [
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS market_names_json JSONB DEFAULT '{}'::jsonb",
+    ]
+    try:
+        with engine.connect() as conn:
+            for stmt in stmts:
+                conn.execute(text(stmt))
+            conn.commit()
+    except Exception as e:
+        print(f"[startup] Schema migration warning: {e}")
+
+_ensure_schema()
+
 app = FastAPI(
     title="Pricing Management Software",
     description="API for pricing product management",

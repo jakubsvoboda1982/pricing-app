@@ -241,6 +241,7 @@ def _enrich_with_price(
         'manufacturer': manufacturer,
         'catalog_price_vat': catalog_price_vat,
         'catalog_quantity_in_stock': catalog_quantity_in_stock,
+        'market_names': getattr(product, 'market_names_json', None) or {},
         'created_at': product.created_at,
         'updated_at': product.updated_at,
     }

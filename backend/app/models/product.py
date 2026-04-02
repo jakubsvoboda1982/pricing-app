@@ -46,5 +46,8 @@ class Product(Base):
     should_have_terms_json = Column(JSONB, default=list, nullable=True)   # ["1kg", "1000g"]
     must_not_have_terms_json = Column(JSONB, default=list, nullable=True) # ["natural", "unsalted"]
 
+    # Názvy produktu v jednotlivých trzích z XML feedu: {"SK": "Kešu ořechy 1kg SK", "HU": "..."}
+    market_names_json = Column(JSONB, default=dict, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
