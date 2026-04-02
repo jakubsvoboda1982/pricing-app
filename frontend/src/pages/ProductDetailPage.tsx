@@ -663,7 +663,8 @@ export default function ProductDetailPage() {
   const margin           = product.margin != null ? Number(product.margin) : null
   const heroScore        = product.hero_score ?? 0
   const competitorUrls   = product.competitor_urls || []
-  const latestPrices     = (prices as PriceRecord[]).slice(0, 10)
+  // latestPrices jsou ALL záznamy — filtrujeme per-market v renderování
+  const allPrices        = (prices as PriceRecord[])
 
   // ── Multi-market ──────────────────────────────────────────────────────────
   const availableMarkets = [...new Set(competitorUrls.map(u => u.market).filter(Boolean))]
@@ -1404,86 +1405,126 @@ export default function ProductDetailPage() {
         <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100">
           <TrendingUp size={15} className="text-gray-500" />
           <h2 className="font-semibold text-gray-900">Vývoj cen</h2>
-          {latestPrices.length > 0 && (
-            <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{latestPrices.length} záznamů</span>
+          {allPrices.length > 0 && (
+            <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{allPrices.filter(p => p.market === activeMarket).length} záznamů · {activeMarket}</span>
           )}
         </div>
 
-        {latestPrices.length === 0 ? (
-          <div className="text-center py-10">
-            <TrendingUp size={32} className="mx-auto text-gray-200 mb-2" />
-            <p className="text-sm text-gray-400">Zatím žádná historie cen.</p>
-            <p className="text-xs text-gray-400 mt-1">Změny cen se budou zobrazovat zde.</p>
-          </div>
-        ) : (
-          <div className="p-5">
-            {/* Mini bar chart */}
-            {(() => {
-              const maxP = Math.max(...latestPrices.map(p => Number(p.current_price)))
-              const minP = Math.min(...latestPrices.map(p => Number(p.current_price)))
-              const range = maxP - minP || 1
-              return (
-                <div className="flex items-end gap-1.5 h-16 mb-4">
-                  {[...latestPrices].reverse().map((p, i) => {
-                    const h = Math.max(((Number(p.current_price) - minP) / range) * 100, 8)
-                    const isLast = i === latestPrices.length - 1
-                    return (
-                      <div key={p.id} className="flex-1 flex flex-col items-center justify-end gap-1 group relative">
-                        <div className="absolute bottom-full mb-1 hidden group-hover:flex bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
-                          {Number(p.current_price).toLocaleString('cs-CZ')} {p.currency} · {new Date(p.changed_at).toLocaleDateString('cs-CZ')}
-                        </div>
-                        <div className="w-full rounded-t transition"
-                          style={{ height: `${h}%`, backgroundColor: isLast ? '#2563eb' : '#bfdbfe' }} />
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            })()}
+        {(() => {
+          // Filtruj cenovou historii dle aktivního trhu
+          const marketPrices = allPrices
+            .filter(p => p.market === activeMarket)
+            .slice(0, 10)
+          const otherMarkets = [...new Set(allPrices.filter(p => p.market !== activeMarket).map(p => p.market))]
 
-            {/* Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <th className="text-left py-2 text-xs font-medium text-gray-400">Datum</th>
-                    <th className="text-right py-2 text-xs font-medium text-gray-400">Cena</th>
-                    <th className="text-right py-2 text-xs font-medium text-gray-400">Přeškrtnutá</th>
-                    <th className="text-right py-2 text-xs font-medium text-gray-400">Trh</th>
-                    <th className="text-right py-2 text-xs font-medium text-gray-400">Změna</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {latestPrices.map((p, i) => {
-                    const prev = latestPrices[i + 1]
-                    const diff = prev ? Number(p.current_price) - Number(prev.current_price) : null
-                    return (
-                      <tr key={p.id} className={`border-b border-gray-50 last:border-0 ${i === 0 ? 'bg-blue-50' : ''}`}>
-                        <td className="py-2 text-gray-500">{new Date(p.changed_at).toLocaleDateString('cs-CZ')}</td>
-                        <td className="py-2 text-right font-semibold text-gray-900">
-                          {Number(p.current_price).toLocaleString('cs-CZ')} {p.currency}
-                        </td>
-                        <td className="py-2 text-right text-gray-400 line-through">
-                          {p.old_price ? `${Number(p.old_price).toLocaleString('cs-CZ')} ${p.currency}` : '—'}
-                        </td>
-                        <td className="py-2 text-right text-gray-500">{p.market}</td>
-                        <td className="py-2 text-right">
-                          {diff != null && diff !== 0 ? (
-                            <span className={`text-xs font-medium ${diff > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {diff > 0 ? '+' : ''}{diff.toLocaleString('cs-CZ')} CZK
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray-300">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+          if (allPrices.length === 0) return (
+            <div className="text-center py-10">
+              <TrendingUp size={32} className="mx-auto text-gray-200 mb-2" />
+              <p className="text-sm text-gray-400">Zatím žádná historie cen.</p>
+              <p className="text-xs text-gray-400 mt-1">Změny cen se budou zobrazovat zde.</p>
             </div>
-          </div>
-        )}
+          )
+
+          if (marketPrices.length === 0) return (
+            <div className="text-center py-10">
+              <p className="text-sm text-gray-400">Žádná cenová historie pro trh <strong>{activeMarket}</strong>.</p>
+              {otherMarkets.length > 0 && (
+                <p className="text-xs text-gray-400 mt-1">Historie existuje pro: {otherMarkets.join(', ')}</p>
+              )}
+            </div>
+          )
+
+          const fmtP = (v: number, cur: string) => v.toLocaleString(
+            cur === 'EUR' ? 'sk-SK' : cur === 'HUF' ? 'hu-HU' : 'cs-CZ',
+            { minimumFractionDigits: cur === 'CZK' ? 0 : 2, maximumFractionDigits: cur === 'CZK' ? 0 : 2 }
+          )
+
+          return (
+            <div className="p-5">
+              {/* Mini bar chart — jen pro aktivní trh */}
+              {(() => {
+                const maxP = Math.max(...marketPrices.map(p => Number(p.current_price)))
+                const minP = Math.min(...marketPrices.map(p => Number(p.current_price)))
+                const range = maxP - minP || 1
+                return (
+                  <div className="flex items-end gap-1.5 h-16 mb-4">
+                    {[...marketPrices].reverse().map((p, i) => {
+                      const h = Math.max(((Number(p.current_price) - minP) / range) * 100, 8)
+                      const isLast = i === marketPrices.length - 1
+                      return (
+                        <div key={p.id} className="flex-1 flex flex-col items-center justify-end gap-1 group relative">
+                          <div className="absolute bottom-full mb-1 hidden group-hover:flex bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
+                            {fmtP(Number(p.current_price), p.currency)} {p.currency} · {new Date(p.changed_at).toLocaleDateString('cs-CZ')}
+                          </div>
+                          <div className="w-full rounded-t transition"
+                            style={{ height: `${h}%`, backgroundColor: isLast ? '#2563eb' : '#bfdbfe' }} />
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+
+              {/* Table — jen pro aktivní trh */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      <th className="text-left py-2 text-xs font-medium text-gray-400">Datum</th>
+                      <th className="text-right py-2 text-xs font-medium text-gray-400">Cena ({activeCurrency})</th>
+                      <th className="text-right py-2 text-xs font-medium text-gray-400">Přeškrtnutá</th>
+                      <th className="text-right py-2 text-xs font-medium text-gray-400">Trh</th>
+                      <th className="text-right py-2 text-xs font-medium text-gray-400">Změna</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {marketPrices.map((p, i) => {
+                      // Změna pouze vůči předchozímu záznamu STEJNÉHO trhu
+                      const prev = marketPrices[i + 1]
+                      const diff = prev ? Number(p.current_price) - Number(prev.current_price) : null
+                      return (
+                        <tr key={p.id} className={`border-b border-gray-50 last:border-0 ${i === 0 ? 'bg-blue-50' : ''}`}>
+                          <td className="py-2 text-gray-500">{new Date(p.changed_at).toLocaleDateString('cs-CZ')}</td>
+                          <td className="py-2 text-right font-semibold text-gray-900">
+                            {fmtP(Number(p.current_price), p.currency)} {p.currency}
+                          </td>
+                          <td className="py-2 text-right text-gray-400 line-through">
+                            {p.old_price ? `${fmtP(Number(p.old_price), p.currency)} ${p.currency}` : '—'}
+                          </td>
+                          <td className="py-2 text-right">
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                              p.market === 'CZ' ? 'bg-blue-50 text-blue-600' :
+                              p.market === 'SK' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-600'
+                            }`}>{MARKET_FLAG[p.market] ?? ''} {p.market}</span>
+                          </td>
+                          <td className="py-2 text-right">
+                            {diff != null && diff !== 0 ? (
+                              <span className={`text-xs font-medium ${diff > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {diff > 0 ? '+' : ''}{fmtP(diff, p.currency)} {p.currency}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-300">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Odkaz na ostatní trhy */}
+              {otherMarkets.length > 0 && (
+                <p className="text-xs text-gray-400 mt-3">
+                  Historie ostatních trhů: {otherMarkets.map(m => (
+                    <button key={m} onClick={() => setViewMarket(m)}
+                      className="ml-1 underline hover:text-gray-600">{m}</button>
+                  ))}
+                </p>
+              )}
+            </div>
+          )
+        })()}
       </div>
 
       {/* ── CONFIRMED MATCHES (Schválené shody s konkurencí) ──────────── */}

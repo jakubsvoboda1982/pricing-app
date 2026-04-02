@@ -149,9 +149,22 @@ def _enrich_with_price(
             manufacturing_cost * (1 + purchase_vat_rate / Decimal('100')), 2
         )
 
+    # ── Kurzy pro přepočet nákupní ceny do měny daného trhu ──────────────────
+    # Nákupní/výrobní cena je vždy v CZK. Pro SK/HU produkty přepočítáme dle kurzu.
+    EXCHANGE_CZK = {'CZK': Decimal('1'), 'EUR': Decimal('24.5'), 'HUF': Decimal('0.0655')}
+    price_market = price.market if price else 'CZ'
+    price_currency = price.currency if price else 'CZK'
+    # Přepočet cost_with_vat do měny produktového trhu (pro správnou marži)
+    cost_with_vat_in_market = None
+    if cost_with_vat is not None and price_currency != 'CZK':
+        rate = EXCHANGE_CZK.get(price_currency, Decimal('1'))
+        cost_with_vat_in_market = round(cost_with_vat / rate, 4)
+    else:
+        cost_with_vat_in_market = cost_with_vat
+
     margin = None
-    if current_price and cost_with_vat and current_price > 0:
-        margin = (current_price - cost_with_vat) / current_price * Decimal('100')
+    if current_price and cost_with_vat_in_market and current_price > 0:
+        margin = (current_price - cost_with_vat_in_market) / current_price * Decimal('100')
         margin = round(margin, 2)
 
     # ── Competitor prices ──────────────────────────────────────────────────
@@ -166,7 +179,22 @@ def _enrich_with_price(
         if comp_prices:
             prices_with_values = [cp for cp in comp_prices if cp.price is not None]
             if prices_with_values:
-                lowest_competitor_price = min(cp.price for cp in prices_with_values)
+                # Nejnižší cena — normalizováno do měny aktivního trhu (price_currency)
+                # Pokud je produkt SK, hledáme nejnižší EUR cenu z SK konkurentů
+                market_prices = [
+                    cp for cp in prices_with_values
+                    if (cp.currency or 'CZK') == price_currency
+                ]
+                if market_prices:
+                    lowest_competitor_price = min(cp.price for cp in market_prices)
+                else:
+                    # Fallback: přepočítej do měny trhu
+                    rate = EXCHANGE_CZK.get(price_currency, Decimal('1'))
+                    lowest_czk = min(
+                        Decimal(str(cp.price)) * EXCHANGE_CZK.get(cp.currency or 'CZK', Decimal('1'))
+                        for cp in prices_with_values
+                    )
+                    lowest_competitor_price = round(lowest_czk / rate, 2)
             competitor_products = [
                 {
                     'id': cp.id,
@@ -226,7 +254,8 @@ def _enrich_with_price(
         'competitor_urls': competitor_urls,
         'current_price': current_price,
         'old_price': price.old_price if price else None,
-        'market': price.market if price else 'CZ',
+        'market': price_market,
+        'currency': price_currency,
         'purchase_price_without_vat': purchase_price_without_vat,
         'purchase_vat_rate': purchase_vat_rate,
         'purchase_price_with_vat': purchase_price_with_vat,

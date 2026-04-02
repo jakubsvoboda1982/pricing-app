@@ -77,6 +77,7 @@ class ProductResponse(BaseModel):
     current_price: Optional[Decimal] = None
     old_price: Optional[Decimal] = None
     market: Optional[str] = None
+    currency: Optional[str] = None  # CZK / EUR / HUF
     # Cenotvorba - purchase price without VAT + VAT rate
     purchase_price_without_vat: Optional[Decimal] = None
     purchase_vat_rate: Optional[Decimal] = None  # Default 12 for CZ

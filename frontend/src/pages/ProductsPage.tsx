@@ -11,7 +11,8 @@ interface Product {
   id: string; name: string; sku: string; product_code?: string | null
   category?: string; ean?: string; thumbnail_url?: string; url_reference?: string
   competitor_urls?: CompetitorUrl[]; current_price?: number | null
-  old_price?: number | null; market?: string; purchase_price_without_vat?: number | null
+  old_price?: number | null; market?: string; currency?: string
+  purchase_price_without_vat?: number | null
   purchase_vat_rate?: number | null; purchase_price_with_vat?: number | null
   min_price?: number | null; margin?: number | null; hero_score?: number | null
   lowest_competitor_price?: number | null; stock_quantity?: number | null
@@ -349,6 +350,10 @@ export default function ProductsPage() {
               const isSelected = selectedIds.has(product.id)
               const isConfirmDelete = confirmDeleteId === product.id
               const cp = product.current_price != null ? Number(product.current_price) : null
+              const cur = product.currency ?? (product.market === 'SK' ? 'EUR' : product.market === 'HU' ? 'HUF' : 'CZK')
+              const fmtPrice = (v: number) => v.toLocaleString(cur === 'EUR' ? 'sk-SK' : cur === 'HUF' ? 'hu-HU' : 'cs-CZ', {
+                minimumFractionDigits: cur === 'CZK' ? 0 : 2, maximumFractionDigits: cur === 'CZK' ? 0 : 2
+              })
               const score = product.hero_score ?? 0
               const lowestComp = product.lowest_competitor_price != null ? Number(product.lowest_competitor_price) : null
               const isPriceAlert = cp != null && lowestComp != null && lowestComp < cp
@@ -402,14 +407,14 @@ export default function ProductsPage() {
                     <div className="w-28 text-right flex-shrink-0">
                       {cp != null ? (
                         <div>
-                          <span className="text-sm font-semibold text-gray-900">{cp.toLocaleString('cs-CZ')} CZK</span>
+                          <span className="text-sm font-semibold text-gray-900">{fmtPrice(cp)} {cur}</span>
                           {product.old_price != null && Number(product.old_price) !== cp && (
-                            <p className="text-xs text-gray-400 line-through">{Number(product.old_price).toLocaleString('cs-CZ')}</p>
+                            <p className="text-xs text-gray-400 line-through">{fmtPrice(Number(product.old_price))}</p>
                           )}
                         </div>
                       ) : product.catalog_price_vat != null ? (
                         <div>
-                          <span className="text-sm font-medium text-gray-500">{Number(product.catalog_price_vat).toLocaleString('cs-CZ')} CZK</span>
+                          <span className="text-sm font-medium text-gray-500">{fmtPrice(Number(product.catalog_price_vat))} {cur}</span>
                           <p className="text-xs text-indigo-400">katalog</p>
                         </div>
                       ) : (
@@ -439,10 +444,10 @@ export default function ProductsPage() {
                       {lowestComp != null ? (
                         <div>
                           <span className={`text-sm font-semibold ${isPriceAlert ? 'text-red-600' : 'text-gray-700'}`}>
-                            {lowestComp.toLocaleString('cs-CZ')} CZK
+                            {fmtPrice(lowestComp)} {cur}
                           </span>
                           {isPriceAlert && cp != null ? (
-                            <p className="text-xs text-red-500 font-medium">▲ +{(cp - lowestComp).toLocaleString('cs-CZ')} CZK</p>
+                            <p className="text-xs text-red-500 font-medium">▲ +{fmtPrice(cp - lowestComp)} {cur}</p>
                           ) : (
                             <p className="text-xs text-gray-400">{product.competitor_urls?.length ?? 0} URL</p>
                           )}
