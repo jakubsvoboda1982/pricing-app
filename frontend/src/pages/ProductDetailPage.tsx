@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -51,6 +51,7 @@ interface Product {
   catalog_price_vat?: number | null
   catalog_quantity_in_stock?: number | null
   market_names?: Record<string, string>
+  stock_divisor?: number | null
   created_at: string
 }
 
@@ -477,9 +478,10 @@ export default function ProductDetailPage() {
   const [manualPriceInput, setManualPriceInput] = useState('')
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null)
   const [historyData, setHistoryData] = useState<Record<string, PriceHistoryEntry[]>>({})
-  const [stockDivisor, setStockDivisor] = useState(1)
+  const [stockDivisor, setStockDivisorState] = useState(1)
   const [editingDivisor, setEditingDivisor] = useState(false)
   const [divisorInput, setDivisorInput] = useState('1')
+  const [savingDivisor, setSavingDivisor] = useState(false)
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
@@ -491,6 +493,31 @@ export default function ProductDetailPage() {
       return await res.json() as Product
     },
   })
+
+  // Synchronizuj stockDivisor ze serveru při načtení produktu
+  useEffect(() => {
+    if (product?.stock_divisor != null && product.stock_divisor >= 1) {
+      setStockDivisorState(product.stock_divisor)
+      setDivisorInput(String(product.stock_divisor))
+    }
+  }, [product?.stock_divisor])
+
+  const saveStockDivisor = async (n: number) => {
+    if (!id) return
+    setSavingDivisor(true)
+    try {
+      await fetch(`${API_BASE_URL}/products/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ stock_divisor: n }),
+      })
+      setStockDivisorState(n)
+      queryClient.invalidateQueries({ queryKey: ['product', id] })
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    } finally {
+      setSavingDivisor(false)
+    }
+  }
 
   const { data: prices = [] } = useQuery({
     queryKey: ['product-prices', id],
@@ -949,17 +976,15 @@ export default function ProductDetailPage() {
                       onKeyDown={e => {
                         if (e.key === 'Enter') {
                           const n = parseInt(divisorInput)
-                          if (n >= 1) setStockDivisor(n)
-                          setEditingDivisor(false)
+                          if (n >= 1) { saveStockDivisor(n); setEditingDivisor(false) }
                         }
                         if (e.key === 'Escape') setEditingDivisor(false)
                       }}
                     />
                     <button onClick={() => {
                       const n = parseInt(divisorInput)
-                      if (n >= 1) setStockDivisor(n)
-                      setEditingDivisor(false)
-                    }} className="text-xs text-blue-600 hover:underline">OK</button>
+                      if (n >= 1) { saveStockDivisor(n); setEditingDivisor(false) }
+                    }} disabled={savingDivisor} className="text-xs text-blue-600 hover:underline disabled:opacity-50">{savingDivisor ? '...' : 'OK'}</button>
                     <button onClick={() => setEditingDivisor(false)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
                   </div>
                 ) : (
