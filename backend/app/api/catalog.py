@@ -433,11 +433,14 @@ def get_catalog_products(
 
 
 @router.get("/categories")
-def get_categories(db: Session = Depends(get_db)):
-    """Získej seznam všech kategorií v katalogu"""
-    categories = db.query(CatalogProduct.category).distinct().filter(
+def get_categories(market: str = None, db: Session = Depends(get_db)):
+    """Získej seznam všech kategorií v katalogu (volitelně filtrovaných dle trhu)"""
+    q = db.query(CatalogProduct.category).distinct().filter(
         CatalogProduct.category.isnot(None)
-    ).all()
+    )
+    if market and market != 'ALL':
+        q = q.filter(CatalogProduct.market == market)
+    categories = q.order_by(CatalogProduct.category).all()
     return [cat[0] for cat in categories]
 
 

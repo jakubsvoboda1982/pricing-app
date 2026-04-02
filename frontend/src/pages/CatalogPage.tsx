@@ -1,10 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Search, Plus, CheckCircle, Package, ExternalLink, ChevronDown,
   ArrowUpDown, ArrowUp, ArrowDown, X, Eye, SlidersHorizontal, Weight,
-  Bookmark
+  Bookmark, Tag,
 } from 'lucide-react'
 import { apiClient, API_BASE_URL } from '@/api/client'
 import { useMarketStore } from '@/store/market'
@@ -92,6 +92,7 @@ export default function CatalogPage() {
   const [addingId, setAddingId] = useState<string | null>(null)
   const [manufacturerOpen, setManufacturerOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [categoriesOpen, setCategoriesOpen] = useState(false)
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkAdding, setBulkAdding] = useState(false)
@@ -103,14 +104,18 @@ export default function CatalogPage() {
   const navigate = useNavigate()
   const selectedMarket = useMarketStore((state) => state.selectedMarket)
 
-  // Categories
+  // Categories — filtrované dle aktuálního trhu
   const { data: categories = [] } = useQuery<string[]>({
-    queryKey: ['catalogCategories'],
+    queryKey: ['catalogCategories', selectedMarket],
     queryFn: async () => {
-      const r = await fetch(`${API_BASE_URL}/catalog/categories`)
+      const params = new URLSearchParams()
+      if (selectedMarket && selectedMarket !== 'ALL') params.set('market', selectedMarket)
+      const r = await fetch(`${API_BASE_URL}/catalog/categories?${params.toString()}`)
       if (!r.ok) return []
       return r.json()
     },
+    // Reset vybrané kategorie při změně trhu
+    placeholderData: [],
   })
 
   // Manufacturers
@@ -126,6 +131,11 @@ export default function CatalogPage() {
       }
     },
   })
+
+  // Resetuj vybranou kategorii při změně trhu
+  useEffect(() => {
+    setSelectedCategory(null)
+  }, [selectedMarket])
 
   const priceRange = PRICE_RANGES[priceRangeIdx]
 
@@ -366,6 +376,19 @@ export default function CatalogPage() {
             </div>
           )}
 
+          {/* Categories toggle */}
+          <button onClick={() => setCategoriesOpen(o => !o)}
+            className={`flex items-center gap-1.5 px-3 py-2 border rounded-lg text-sm transition ${
+              categoriesOpen || selectedCategory ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+            }`}>
+            <Tag size={14} />
+            Kategorie
+            {selectedCategory && (
+              <span className="bg-blue-600 text-white text-xs w-4 h-4 rounded-full flex items-center justify-center font-bold">1</span>
+            )}
+            <ChevronDown size={13} className={categoriesOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+          </button>
+
           {/* More filters toggle */}
           <button onClick={() => setFiltersOpen(o => !o)}
             className={`flex items-center gap-1.5 px-3 py-2 border rounded-lg text-sm transition ${
@@ -441,23 +464,37 @@ export default function CatalogPage() {
           </div>
         )}
 
-        {/* Row 2: Category chips */}
-        {categories.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 border-t border-gray-100 pt-3">
-            <button onClick={() => setSelectedCategory(null)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition ${
-                selectedCategory === null ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}>
-              Vše
-            </button>
-            {categories.map((cat) => (
-              <button key={cat} onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)} title={cat}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition max-w-[200px] truncate ${
-                  selectedCategory === cat ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+        {/* Kategorie — skryté, zobrazí se po kliknutí na tlačítko */}
+        {categoriesOpen && categories.length > 0 && (
+          <div className="border-t border-gray-100 pt-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                <Tag size={11} />
+                {selectedMarket === 'SK' ? '🇸🇰 SK' : selectedMarket === 'CZ' ? '🇨🇿 CZ' : ''} Kategorie
+              </span>
+              {selectedCategory && (
+                <button onClick={() => setSelectedCategory(null)}
+                  className="text-xs text-blue-600 hover:underline flex items-center gap-0.5">
+                  <X size={10} /> Zrušit
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <button onClick={() => setSelectedCategory(null)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition ${
+                  selectedCategory === null ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}>
-                {cat.split('|').pop()?.trim() || cat}
+                Vše
               </button>
-            ))}
+              {categories.map((cat) => (
+                <button key={cat} onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)} title={cat}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition max-w-[200px] truncate ${
+                    selectedCategory === cat ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}>
+                  {cat.split('|').pop()?.trim() || cat}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
