@@ -181,19 +181,22 @@ class HeureaFeedParser:
         # Fall back to ITEM (legacy / other formats)
         return root.findall('.//ITEM')
 
-    def parse_string(self, xml_string: str, market: str = "CZ") -> Tuple[List[Dict], List[Dict]]:
+    def parse_string(self, xml_data, market: str = "CZ") -> Tuple[List[Dict], List[Dict]]:
         """
-        Parse XML string and return (products, errors).
+        Parse XML string or bytes and return (products, errors).
 
         Args:
-            xml_string: Raw XML content
-            market:     "CZ" or "SK"
+            xml_data: Raw XML content (str or bytes).
+                      Bytes are preferred — ET reads encoding from XML declaration.
+                      Strings are decoded already; ET ignores the encoding declaration.
+            market:   "CZ" or "SK"
 
         Returns:
             (list[dict], list[error_dicts])
         """
         try:
-            root = ET.fromstring(xml_string)
+            # ET.fromstring handles both bytes (reads encoding decl) and str
+            root = ET.fromstring(xml_data)
         except ET.ParseError as e:
             raise HeurekaParsError(f"Chyba při parsování XML: {e}")
 

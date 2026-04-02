@@ -206,17 +206,23 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(feed_sub.feed_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            async with session.get(
+                feed_sub.feed_url,
+                timeout=aiohttp.ClientTimeout(total=120),  # 120 s pro velké feedy
+            ) as resp:
                 if resp.status != 200:
                     raise Exception(f"HTTP {resp.status}")
-                xml_string = await resp.text()
+                # Čteme jako bytes a předáme přímo ET — správně zpracuje encoding z XML deklarace
+                xml_bytes = await resp.read()
 
+        # Předáme bytes parseru; ET.fromstring(bytes) přečte encoding z XML deklarace
         parser = HeureaFeedParser()
-        products, errors = parser.parse_string(xml_string, market=feed_sub.market)
+        products, parse_errors = parser.parse_string(xml_bytes, market=feed_sub.market)
 
         imported_count = 0
         updated_count = 0
         skipped_count = 0
+        parse_error_count = len(parse_errors)
 
         for product_data in products:
             try:
@@ -292,11 +298,25 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                 # (např. SK feed aktualizuje SK cenu/název u produktu sledovaného v CZ)
                 _sync_by_ean(db, ean, name, price_vat, feed_sub.market, company.id)
             except Exception:
+                # DŮLEŽITÉ: rollback nutný před dalším použitím session
+                # (bez rollback by SQLAlchemy odmítl další operace na broken transakci)
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
                 skipped_count += 1
                 continue
 
+        total_in_feed = imported_count + updated_count + skipped_count + parse_error_count
+        msg_parts = [
+            f"Importováno: {imported_count}",
+            f"aktualizováno: {updated_count}",
+            f"přeskočeno: {skipped_count}",
+        ]
+        if parse_error_count:
+            msg_parts.append(f"chyby parsování: {parse_error_count}")
         feed_sub.last_fetch_status = "success"
-        feed_sub.last_fetch_message = f"Importováno: {imported_count}, aktualizováno: {updated_count}, přeskočeno: {skipped_count}"
+        feed_sub.last_fetch_message = ", ".join(msg_parts)
         feed_sub.last_imported_count = imported_count
         feed_sub.last_updated_count = updated_count
 
