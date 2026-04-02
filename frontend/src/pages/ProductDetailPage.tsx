@@ -506,13 +506,22 @@ export default function ProductDetailPage() {
     if (!id) return
     setSavingDivisor(true)
     try {
-      await fetch(`${API_BASE_URL}/products/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/products/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ stock_divisor: n }),
       })
+      if (!res.ok) {
+        alert(`Chyba při ukládání: ${res.status}`)
+        return
+      }
+      // Nastavíme stav PŘED invalidací, aby useEffect viděl správnou hodnotu z DB
       setStockDivisorState(n)
-      queryClient.invalidateQueries({ queryKey: ['product', id] })
+      setDivisorInput(String(n))
+      // Aktualizujeme cache přímo bez triggeru useEffect
+      queryClient.setQueryData(['product', id], (old: any) =>
+        old ? { ...old, stock_divisor: n } : old
+      )
       queryClient.invalidateQueries({ queryKey: ['products'] })
     } finally {
       setSavingDivisor(false)
