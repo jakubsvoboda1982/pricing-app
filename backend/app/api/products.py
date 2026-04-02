@@ -353,6 +353,48 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
         Product.company_id == company.id
     ).first()
     if existing:
+        # Produkt s tímto SKU/EAN již existuje — zajisti, že má i cenu pro daný trh
+        # (např. uživatel klikl "Sledovat" na SK katalogový produkt, ale CZ produkt s EAN již sleduje)
+        _cat_market = extra_data.get('_catalog_market', 'CZ')
+        _cat_price_raw = extra_data.get('_catalog_price_without_vat')
+        _cat_vat = extra_data.get('_catalog_vat_rate')
+        _cat_name = product.name
+        if _cat_price_raw is not None and _cat_price_raw > 0:
+            try:
+                from sqlalchemy import desc as _desc
+                _cat_currency = 'CZK' if _cat_market == 'CZ' else ('EUR' if _cat_market == 'SK' else 'HUF')
+                _vat = Decimal(str(_cat_vat)) if _cat_vat is not None else Decimal('0')
+                _price_vat = round(Decimal(str(_cat_price_raw)) * (1 + _vat / Decimal('100')), 2)
+                _latest = db.query(Price).filter(
+                    Price.product_id == existing.id,
+                    Price.market == _cat_market,
+                ).order_by(_desc(Price.changed_at)).first()
+                if _latest:
+                    if _latest.current_price != _price_vat:
+                        _latest.old_price = _latest.current_price
+                        _latest.current_price = _price_vat
+                        _latest.currency = _cat_currency
+                else:
+                    db.add(Price(
+                        product_id=existing.id,
+                        market=_cat_market,
+                        currency=_cat_currency,
+                        current_price=_price_vat,
+                    ))
+            except Exception:
+                pass
+        # Uloži název z SK/HU feedu
+        if _cat_market != 'CZ' and _cat_name:
+            try:
+                names = dict(existing.market_names_json or {})
+                names[_cat_market] = _cat_name
+                existing.market_names_json = names
+            except Exception:
+                pass
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
         return ProductResponse(**_enrich_with_price(existing, db))
 
     db_product = Product(
@@ -384,10 +426,12 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
         try:
             vat = Decimal(str(cat_vat)) if cat_vat is not None else Decimal('0')
             price_vat = Decimal(str(cat_price_raw)) * (1 + vat / Decimal('100'))
+            _mkt = extra_data.get('_catalog_market', 'CZ')
+            _currency = 'CZK' if _mkt == 'CZ' else ('EUR' if _mkt == 'SK' else 'HUF')
             initial_price = Price(
                 product_id=db_product.id,
-                market=extra_data.get('_catalog_market', 'CZ'),
-                currency='CZK',
+                market=_mkt,
+                currency=_currency,
                 current_price=round(price_vat, 2),
             )
             db.add(initial_price)

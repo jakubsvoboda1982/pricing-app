@@ -16,7 +16,9 @@ interface Product {
   min_price?: number | null; margin?: number | null; hero_score?: number | null
   lowest_competitor_price?: number | null; stock_quantity?: number | null
   manufacturer?: string | null; catalog_price_vat?: number | null
-  catalog_quantity_in_stock?: number | null; created_at: string
+  catalog_quantity_in_stock?: number | null
+  market_names?: Record<string, string>
+  created_at: string
 }
 
 interface LinkResult {
@@ -79,7 +81,15 @@ export default function ProductsPage() {
     const q = search.toLowerCase()
     const matchSearch = !search || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)
       || (p.product_code ?? '').toLowerCase().includes(q)
-    return matchSearch && shouldShowMarket(p.market, selectedMarket)
+    // Trh: produkt patří do trhu pokud:
+    // 1. jeho poslední cena je z daného trhu (p.market), nebo
+    // 2. má konkurenta na daném trhu (competitor_urls), nebo
+    // 3. má název produktu z feedu pro daný trh (market_names = SK feed import)
+    const matchMarket = selectedMarket === 'ALL'
+      || (p.market || 'CZ') === selectedMarket
+      || (p.competitor_urls ?? []).some(u => (u.market || 'CZ') === selectedMarket)
+      || (selectedMarket !== ('ALL' as string) && !!p.market_names?.[selectedMarket])
+    return matchSearch && matchMarket
   })
 
   const handleBulkLink = async (ids?: string[]) => {
