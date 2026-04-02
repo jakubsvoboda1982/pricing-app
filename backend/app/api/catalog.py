@@ -386,7 +386,14 @@ def get_catalog_products(
     if market:
         query = query.filter(CatalogProduct.market == market)
     if category:
-        query = query.filter(CatalogProduct.category == category)
+        # Přesná shoda NEBO hierarchická kategorie končící na "| category" (Heureka CZ formát)
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                CatalogProduct.category == category,
+                CatalogProduct.category.ilike(f'% | {category}'),
+            )
+        )
     if manufacturer:
         query = query.filter(CatalogProduct.manufacturer == manufacturer)
     if search:
@@ -434,14 +441,27 @@ def get_catalog_products(
 
 @router.get("/categories")
 def get_categories(market: str = None, db: Session = Depends(get_db)):
-    """Získej seznam všech kategorií v katalogu (volitelně filtrovaných dle trhu)"""
+    """
+    Získej seznam unikátních kategorií v katalogu.
+    Pro hierarchické kategorie Heureka CZ (formát "A | B | C") vrací
+    poslední segment — takže CZ i SK nabídnou srovnatelný počet filtrů.
+    """
     q = db.query(CatalogProduct.category).distinct().filter(
         CatalogProduct.category.isnot(None)
     )
     if market and market != 'ALL':
         q = q.filter(CatalogProduct.market == market)
-    categories = q.order_by(CatalogProduct.category).all()
-    return [cat[0] for cat in categories]
+    rows = q.all()
+
+    # Extrahuj poslední segment z hierarchické kategorie ("A | B | C" → "C")
+    segments: set[str] = set()
+    for (cat,) in rows:
+        if cat:
+            segment = cat.split('|')[-1].strip()
+            if segment:
+                segments.add(segment)
+
+    return sorted(segments)
 
 
 @router.get("/manufacturers")

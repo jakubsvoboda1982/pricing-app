@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Search, Plus, CheckCircle, Package, ExternalLink, ChevronDown,
   ArrowUpDown, ArrowUp, ArrowDown, X, Eye, SlidersHorizontal, Weight,
-  Bookmark, Tag,
+  Bookmark, Tag, Star, Save,
 } from 'lucide-react'
 import { apiClient, API_BASE_URL } from '@/api/client'
 import { useMarketStore } from '@/store/market'
@@ -79,6 +79,36 @@ function formatPrice(price?: number | null, decimals = 2) {
   })
 }
 
+// ── Oblíbené filtry ──────────────────────────────────────────────────────────
+
+interface SavedFilter {
+  id: string
+  name: string
+  market: string
+  category: string | null
+  manufacturer: string | null
+  search: string
+  weightRangeIdx: number
+  priceRangeIdx: number
+  stockFilter: 'all' | 'in_stock'
+}
+
+const SAVED_FILTERS_KEY = 'catalog_saved_filters'
+
+function loadSavedFilters(): SavedFilter[] {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED_FILTERS_KEY) || '[]')
+  } catch {
+    return []
+  }
+}
+
+function persistSavedFilters(filters: SavedFilter[]) {
+  localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(filters))
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
 export default function CatalogPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
@@ -93,6 +123,9 @@ export default function CatalogPage() {
   const [manufacturerOpen, setManufacturerOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [categoriesOpen, setCategoriesOpen] = useState(false)
+  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>(loadSavedFilters)
+  const [savingFilter, setSavingFilter] = useState(false)
+  const [saveFilterName, setSaveFilterName] = useState('')
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkAdding, setBulkAdding] = useState(false)
@@ -299,6 +332,43 @@ export default function CatalogPage() {
     resetLimit()
   }
 
+  const handleSaveFilter = () => {
+    const name = saveFilterName.trim() || `Filtr ${savedFilters.length + 1}`
+    const newFilter: SavedFilter = {
+      id: Date.now().toString(),
+      name,
+      market: selectedMarket,
+      category: selectedCategory,
+      manufacturer: selectedManufacturer,
+      search: searchTerm,
+      weightRangeIdx,
+      priceRangeIdx,
+      stockFilter,
+    }
+    const updated = [...savedFilters, newFilter]
+    setSavedFilters(updated)
+    persistSavedFilters(updated)
+    setSavingFilter(false)
+    setSaveFilterName('')
+  }
+
+  const handleApplyFilter = (f: SavedFilter) => {
+    useMarketStore.setState({ selectedMarket: f.market as any })
+    setSelectedCategory(f.category)
+    setSelectedManufacturer(f.manufacturer)
+    setSearchTerm(f.search)
+    setWeightRangeIdx(f.weightRangeIdx)
+    setPriceRangeIdx(f.priceRangeIdx)
+    setStockFilter(f.stockFilter)
+    resetLimit()
+  }
+
+  const handleDeleteFilter = (id: string) => {
+    const updated = savedFilters.filter(f => f.id !== id)
+    setSavedFilters(updated)
+    persistSavedFilters(updated)
+  }
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -327,6 +397,49 @@ export default function CatalogPage() {
           </div>
         </div>
       </div>
+
+      {/* Oblíbené filtry */}
+      {(savedFilters.length > 0 || savingFilter) && (
+        <div className="bg-white rounded-xl border border-gray-200 px-4 py-3 flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium text-gray-500 flex items-center gap-1 flex-shrink-0">
+            <Star size={12} className="text-yellow-500 fill-yellow-400" /> Oblíbené
+          </span>
+          {savedFilters.map(f => (
+            <div key={f.id} className="flex items-center gap-0.5 bg-yellow-50 border border-yellow-200 rounded-lg overflow-hidden">
+              <button
+                onClick={() => handleApplyFilter(f)}
+                className="px-2.5 py-1 text-xs font-medium text-yellow-800 hover:bg-yellow-100 transition flex items-center gap-1.5">
+                {f.market !== 'ALL' && <span>{f.market === 'SK' ? '🇸🇰' : '🇨🇿'}</span>}
+                {f.name}
+              </button>
+              <button
+                onClick={() => handleDeleteFilter(f.id)}
+                className="px-1.5 py-1 text-yellow-500 hover:text-red-500 hover:bg-red-50 transition">
+                <X size={11} />
+              </button>
+            </div>
+          ))}
+          {savingFilter ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                autoFocus
+                value={saveFilterName}
+                onChange={e => setSaveFilterName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleSaveFilter()
+                  if (e.key === 'Escape') { setSavingFilter(false); setSaveFilterName('') }
+                }}
+                placeholder="Název filtru…"
+                className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-yellow-400 w-36"
+              />
+              <button onClick={handleSaveFilter}
+                className="text-xs bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded transition">Uložit</button>
+              <button onClick={() => { setSavingFilter(false); setSaveFilterName('') }}
+                className="text-xs text-gray-400 hover:text-gray-600"><X size={12} /></button>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* Filters bar */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
@@ -410,6 +523,36 @@ export default function CatalogPage() {
               <X size={13} /> Zrušit vše
             </button>
           )}
+
+          {/* Save filter as favourite */}
+          {!savingFilter ? (
+            <button
+              onClick={() => setSavingFilter(true)}
+              title="Uložit aktuální filtr jako oblíbený"
+              className="flex items-center gap-1.5 px-3 py-2 border border-yellow-300 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-lg text-sm transition ml-auto">
+              <Star size={13} className="fill-yellow-400" /> Uložit filtr
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 ml-auto">
+              <input
+                autoFocus
+                value={saveFilterName}
+                onChange={e => setSaveFilterName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleSaveFilter()
+                  if (e.key === 'Escape') { setSavingFilter(false); setSaveFilterName('') }
+                }}
+                placeholder="Název filtru…"
+                className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-yellow-400 w-40"
+              />
+              <button onClick={handleSaveFilter}
+                className="flex items-center gap-1 px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white text-sm rounded-lg transition">
+                <Save size={13} /> Uložit
+              </button>
+              <button onClick={() => { setSavingFilter(false); setSaveFilterName('') }}
+                className="p-1.5 text-gray-400 hover:text-gray-600"><X size={14} /></button>
+            </div>
+          )}
         </div>
 
         {/* Expanded filters panel */}
@@ -491,7 +634,7 @@ export default function CatalogPage() {
                   className={`px-3 py-1 rounded-full text-xs font-medium transition max-w-[200px] truncate ${
                     selectedCategory === cat ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}>
-                  {cat.split('|').pop()?.trim() || cat}
+                  {cat}
                 </button>
               ))}
             </div>
