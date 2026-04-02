@@ -37,6 +37,7 @@ from app.database import get_db
 from app.middleware.auth import verify_token
 from app.models.competitor import Competitor
 from app.models.competitor_candidate import CompetitorCandidate
+from app.models.price import Price
 from app.models.product import Product
 from app.models.product_match import ProductMatch
 from app.scraping.domain_guard import DomainGuard
@@ -251,6 +252,7 @@ def list_matches(
     status: Optional[str] = Query(None, description="proposed|auto_approved|manually_approved|rejected|inactive"),
     grade: Optional[str] = Query(None, description="A|B|C|X"),
     market: Optional[str] = Query(None, description="CZ|SK|HU — filtruje dle trhu konkurenta"),
+    product_market: Optional[str] = Query(None, description="CZ|SK|HU — filtruje dle trhu produktu (dle záznamu v ceníku)"),
     is_active: Optional[bool] = Query(True),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -274,6 +276,10 @@ def list_matches(
         # Filtruj dle trhu konkurenta — JOIN přes competitor_id
         q = q.join(Competitor, ProductMatch.competitor_id == Competitor.id)\
              .filter(Competitor.market == market)
+    if product_market:
+        # Filtruj dle trhu produktu — produkt musí mít alespoň jednu cenu v daném trhu
+        sk_product_ids = db.query(Price.product_id).filter(Price.market == product_market).distinct().subquery()
+        q = q.filter(ProductMatch.product_id.in_(sk_product_ids))
 
     q = q.order_by(ProductMatch.match_confidence_score.desc().nullslast())
     matches = q.offset(skip).limit(limit).all()
@@ -535,6 +541,7 @@ def get_match_stats(
     product_id: Optional[str] = Query(None),
     competitor_id: Optional[str] = Query(None),
     market: Optional[str] = Query(None, description="CZ|SK|HU — filtruje dle trhu konkurenta"),
+    product_market: Optional[str] = Query(None, description="CZ|SK|HU — filtruje dle trhu produktu"),
     db: Session = Depends(get_db),
     _token=Depends(verify_token),
 ):
@@ -548,6 +555,9 @@ def get_match_stats(
     if market:
         q = q.join(Competitor, ProductMatch.competitor_id == Competitor.id)\
              .filter(Competitor.market == market)
+    if product_market:
+        pm_product_ids = db.query(Price.product_id).filter(Price.market == product_market).distinct().subquery()
+        q = q.filter(ProductMatch.product_id.in_(pm_product_ids))
 
     rows = q.group_by(ProductMatch.match_status).all()
 

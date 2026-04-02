@@ -499,20 +499,20 @@ export default function MatchReviewPage() {
   const [gradeFilter, setGradeFilter] = useState<string>('')
   const [marketFilter, setMarketFilter] = useState<string>('') // '' = Vše, 'CZ', 'SK'
 
-  // Stats
+  // Stats — filtrujeme dle trhu PRODUKTU (ne konkurenta)
   const { data: stats } = useQuery<MatchStats>({
     queryKey: ['match-stats', marketFilter],
-    queryFn: () => apiClient.getMatchStats({ market: marketFilter || undefined } as any),
+    queryFn: () => apiClient.getMatchStats({ product_market: marketFilter || undefined }),
     refetchInterval: 15000,
   })
 
-  // Matches
+  // Matches — filtrujeme dle trhu PRODUKTU (ne konkurenta)
   const { data: matches = [], isLoading, refetch } = useQuery<Match[]>({
     queryKey: ['matches', statusFilter, gradeFilter, marketFilter],
     queryFn: () => apiClient.getMatches({
       status: statusFilter || undefined,
       grade: gradeFilter || undefined,
-      market: marketFilter || undefined,
+      product_market: marketFilter || undefined,
       limit: 100,
     }),
     refetchInterval: 20000,
