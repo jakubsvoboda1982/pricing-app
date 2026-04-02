@@ -26,6 +26,8 @@ import BaselinkerPage from './pages/BaselinkerPage'
 import RecommendationsPage from './pages/RecommendationsPage'
 import WatchlistPage from './pages/WatchlistPage'
 import MatchReviewPage from './pages/MatchReviewPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import { useAuthStore } from './store/auth'
 
 const queryClient = new QueryClient({
@@ -51,6 +53,8 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route
         element={
           <ProtectedRoute>

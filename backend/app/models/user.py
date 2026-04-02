@@ -23,5 +23,9 @@ class User(Base):
     verification_token_hash = Column(String, nullable=True)  # Hash of verification token
     verification_token_expires_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Password reset workflow
+    password_reset_token_hash = Column(String, nullable=True)
+    password_reset_token_expires_at = Column(DateTime(timezone=True), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

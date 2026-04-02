@@ -4,7 +4,7 @@ from app.database import get_db
 from app.schemas.auth import UserLogin, UserRegister, TokenResponse, UserResponse, RegisterResponse, VerifyEmailRequest, VerifyEmailResponse
 from app.models import User, Company, LoginAttempt
 from app.utils.password import hash_password, verify_password
-from app.utils.email import send_verification_email
+from app.utils.email import send_verification_email, send_password_reset_email
 from app.middleware.auth import create_access_token, verify_token
 from datetime import datetime, timedelta
 import secrets
@@ -160,6 +160,67 @@ def login(credentials: UserLogin, request: Request, db: Session = Depends(get_db
         data={"sub": str(user.id), "email": user.email}
     )
     return TokenResponse(access_token=access_token)
+
+@router.post("/forgot-password")
+async def forgot_password(data: dict, db: Session = Depends(get_db)):
+    """
+    Zahájí obnovu hesla — pošle email s reset tokenem.
+    Vždy vrátí 200 (i když email neexistuje) aby nedošlo k user enumeration.
+    """
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email je povinný")
+
+    user = db.query(User).filter(User.email == email).first()
+    if user and user.is_active:
+        reset_token = secrets.token_urlsafe(32)
+        token_hash = bcrypt.hashpw(reset_token.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        user.password_reset_token_hash = token_hash
+        user.password_reset_token_expires_at = datetime.utcnow() + timedelta(hours=1)
+        db.commit()
+        await send_password_reset_email(email, reset_token)
+
+    return {"message": "Pokud je email registrován, obdržíš odkaz pro obnovu hesla."}
+
+
+@router.post("/reset-password")
+def reset_password(data: dict, db: Session = Depends(get_db)):
+    """Nastaví nové heslo pomocí reset tokenu."""
+    email = (data.get("email") or "").strip().lower()
+    token = (data.get("token") or "").strip()
+    new_password = data.get("password") or ""
+
+    if not email or not token or not new_password:
+        raise HTTPException(status_code=400, detail="Email, token a heslo jsou povinné")
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Heslo musí mít alespoň 8 znaků")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not user.password_reset_token_hash:
+        raise HTTPException(status_code=400, detail="Neplatný nebo vypršený odkaz pro obnovu hesla")
+
+    if user.password_reset_token_expires_at and datetime.utcnow() > user.password_reset_token_expires_at:
+        user.password_reset_token_hash = None
+        user.password_reset_token_expires_at = None
+        db.commit()
+        raise HTTPException(status_code=400, detail="Odkaz pro obnovu hesla vypršel. Požádej o nový.")
+
+    try:
+        is_valid = bcrypt.checkpw(token.encode('utf-8'), user.password_reset_token_hash.encode('utf-8'))
+    except Exception:
+        is_valid = False
+
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="Neplatný nebo vypršený odkaz pro obnovu hesla")
+
+    from app.utils.password import hash_password
+    user.hashed_password = hash_password(new_password)
+    user.password_reset_token_hash = None
+    user.password_reset_token_expires_at = None
+    db.commit()
+
+    return {"message": "Heslo bylo úspěšně změněno. Nyní se můžeš přihlásit."}
+
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user(payload: dict = Depends(verify_token), db: Session = Depends(get_db)):

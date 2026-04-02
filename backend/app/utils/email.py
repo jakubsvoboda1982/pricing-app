@@ -98,6 +98,72 @@ Tento odkaz vyprší za 24 hodin.
         return False
 
 
+async def send_password_reset_email(email: str, token: str) -> bool:
+    """Send password reset link to user"""
+    settings = get_settings()
+    from urllib.parse import quote
+    reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}&email={quote(email)}"
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "Obnova hesla - Pricing Management"
+        msg["From"] = settings.SMTP_FROM_EMAIL
+        msg["To"] = email
+
+        html_body = f"""
+        <html>
+            <head></head>
+            <body style="font-family: Arial, sans-serif; color: #333;">
+                <div style="max-width: 500px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #2563eb;">Obnova hesla</h2>
+                    <p>Ahoj,</p>
+                    <p>Obdrželi jsme žádost o obnovu hesla k tvému účtu. Klikni na tlačítko níže pro nastavení nového hesla.</p>
+                    <div style="margin: 30px 0;">
+                        <a href="{reset_url}" style="background-color: #2563eb; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                            Nastavit nové heslo
+                        </a>
+                    </div>
+                    <p>Nebo zkopíruj tento odkaz do prohlížeče:</p>
+                    <p style="word-break: break-all; color: #666;">
+                        <a href="{reset_url}" style="color: #2563eb;">{reset_url}</a>
+                    </p>
+                    <p style="color: #999; font-size: 12px; margin-top: 30px;">
+                        Tento odkaz vyprší za 1 hodinu. Pokud jsi o obnovu hesla nežádal/a, tento email ignoruj.
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+
+        text_body = f"""Obnova hesla
+
+Ahoj,
+
+Obdrželi jsme žádost o obnovu hesla. Nastav nové heslo kliknutím na odkaz:
+
+{reset_url}
+
+Tento odkaz vyprší za 1 hodinu. Pokud jsi o obnovu nežádal/a, tento email ignoruj.
+        """
+
+        msg.attach(MIMEText(text_body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
+
+        use_ssl = settings.SMTP_PORT == 465
+        smtp = aiosmtplib.SMTP(hostname=settings.SMTP_HOST, port=settings.SMTP_PORT, use_tls=use_ssl)
+        await smtp.connect()
+        if not use_ssl:
+            await smtp.starttls()
+        await smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+        await smtp.send_message(msg)
+        await smtp.quit()
+        return True
+
+    except Exception as e:
+        print(f"Error sending password reset email to {email}: {e}")
+        return False
+
+
 async def send_approval_notification_email(email: str, full_name: str) -> bool:
     """
     Send email notifying user that their account has been approved
