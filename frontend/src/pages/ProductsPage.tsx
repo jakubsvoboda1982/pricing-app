@@ -19,6 +19,7 @@ interface Product {
   manufacturer?: string | null; catalog_price_vat?: number | null
   catalog_quantity_in_stock?: number | null
   market_names?: Record<string, string>
+  stock_divisor?: number | null
   created_at: string
 }
 
@@ -420,7 +421,9 @@ export default function ProductsPage() {
                     {/* Skladem */}
                     <div className="w-24 text-right flex-shrink-0">
                       {(() => {
-                        const qty = product.stock_quantity ?? product.catalog_quantity_in_stock
+                        const rawQty = product.stock_quantity ?? product.catalog_quantity_in_stock
+                        const divisor = (product.stock_divisor ?? 1) >= 1 ? (product.stock_divisor ?? 1) : 1
+                        const qty = rawQty != null ? Math.floor(rawQty / divisor) : null
                         const fromBl = product.stock_quantity != null
                         if (qty == null) return <span className="text-xs text-gray-300">—</span>
                         return (
@@ -428,7 +431,8 @@ export default function ProductsPage() {
                             <span className={`text-sm font-semibold ${qty > 10 ? 'text-green-700' : qty > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
                               {qty} ks
                             </span>
-                            {!fromBl && <p className="text-xs text-gray-400">katalog</p>}
+                            {divisor > 1 && <p className="text-xs text-blue-400">÷{divisor}</p>}
+                            {!fromBl && divisor === 1 && <p className="text-xs text-gray-400">katalog</p>}
                           </div>
                         )
                       })()}
