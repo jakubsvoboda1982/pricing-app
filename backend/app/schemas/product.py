@@ -29,6 +29,7 @@ class ProductUpdate(BaseModel):
     ean: Optional[str] = None
     thumbnail_url: Optional[str] = None
     url_reference: Optional[str] = None
+    stock_divisor: Optional[int] = None
 
 
 class PriceCreate(BaseModel):
@@ -96,6 +97,7 @@ class ProductResponse(BaseModel):
     catalog_quantity_in_stock: Optional[int] = None  # Sklad z katalogu (XML feedu)
     # Názvy produktu z XML feedů v jiných trzích: {"SK": "Kešu ořechy 1kg SK", "HU": "..."}
     market_names: Optional[Dict[str, Any]] = None
+    stock_divisor: Optional[int] = 1
     created_at: datetime
     updated_at: Optional[datetime] = None
 

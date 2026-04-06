@@ -49,5 +49,8 @@ class Product(Base):
     # Názvy produktu v jednotlivých trzích z XML feedu: {"SK": "Kešu ořechy 1kg SK", "HU": "..."}
     market_names_json = Column(JSONB, default=dict, nullable=True)
 
+    # Koeficient pro přepočet skladovosti (např. 2 = zobrazit polovinu)
+    stock_divisor = Column(Integer, nullable=True, default=1)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
