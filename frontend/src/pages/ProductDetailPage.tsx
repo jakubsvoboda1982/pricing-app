@@ -188,7 +188,11 @@ function ConfirmedMatchesSection({ productId }: { productId: string }) {
   // Fetch active (approved) matches for this product
   const { data: activeMatches = [], isLoading, refetch } = useQuery<ProductMatch[]>({
     queryKey: ['product-matches-active', productId],
-    queryFn: () => apiClient.getProductMatches(productId, 'active'),
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/matching/product/${productId}/matches?status=active`, { headers: authHeaders() })
+      if (!res.ok) return []
+      return res.json()
+    },
     enabled: !!productId,
     refetchInterval: 30000,
   })
@@ -196,7 +200,11 @@ function ConfirmedMatchesSection({ productId }: { productId: string }) {
   // Fetch proposed (pending review) count
   const { data: proposedMatches = [] } = useQuery<ProductMatch[]>({
     queryKey: ['product-matches-proposed', productId],
-    queryFn: () => apiClient.getProductMatches(productId, 'proposed'),
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/matching/product/${productId}/matches?status=proposed`, { headers: authHeaders() })
+      if (!res.ok) return []
+      return res.json()
+    },
     enabled: !!productId,
     refetchInterval: 30000,
   })
