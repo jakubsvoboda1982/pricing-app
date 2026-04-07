@@ -278,14 +278,24 @@ def _enrich_with_price(
 
 
 @router.get("/", response_model=list[ProductResponse])
-def list_products(db: Session = Depends(get_db)):
+def list_products(
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
     """
     Batch-optimized list: fetches prices, competitor prices and catalog data
     in 4 queries total instead of 3×N (N+1 fix).
     """
-    from app.models import CompetitorProductPrice
+    from app.models import CompetitorProductPrice, User
 
-    products = db.query(Product).all()
+    # Authenticate user and get their company
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    # Filter products by company
+    products = db.query(Product).filter(Product.company_id == user.company_id).all()
     if not products:
         return []
 
@@ -338,10 +348,22 @@ def list_products(db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=ProductResponse)
-def create_product(product: ProductCreate, db: Session = Depends(get_db)):
-    company = db.query(Company).first()
+def create_product(
+    product: ProductCreate,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
+    from app.models import User
+
+    # Authenticate user and get their company
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    company = db.query(Company).filter(Company.id == user.company_id).first()
     if not company:
-        raise HTTPException(status_code=400, detail="Žádná společnost")
+        raise HTTPException(status_code=400, detail="Společnost nenalezena")
 
     extra_data = {}
     if product.catalog_product_id:
@@ -474,16 +496,51 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{product_id}", response_model=ProductResponse)
-def get_product(product_id: UUID, db: Session = Depends(get_db)):
-    product = db.query(Product).filter(Product.id == product_id).first()
+def get_product(
+    product_id: UUID,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
+    from app.models import User
+    from sqlalchemy import and_
+
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    product = db.query(Product).filter(
+        and_(
+            Product.id == product_id,
+            Product.company_id == user.company_id
+        )
+    ).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     return ProductResponse(**_enrich_with_price(product, db))
 
 
 @router.put("/{product_id}", response_model=ProductResponse)
-def update_product(product_id: UUID, product_update: ProductUpdate, db: Session = Depends(get_db)):
-    product = db.query(Product).filter(Product.id == product_id).first()
+def update_product(
+    product_id: UUID,
+    product_update: ProductUpdate,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
+    from app.models import User
+    from sqlalchemy import and_
+
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    product = db.query(Product).filter(
+        and_(
+            Product.id == product_id,
+            Product.company_id == user.company_id
+        )
+    ).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
@@ -499,10 +556,24 @@ def update_product(product_id: UUID, product_update: ProductUpdate, db: Session 
 def update_stock_divisor(
     product_id: UUID,
     divisor: int,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
     """Nastav koeficient pro přepočet skladovosti (stock_divisor)."""
-    product = db.query(Product).filter(Product.id == product_id).first()
+    from app.models import User
+    from sqlalchemy import and_
+
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    product = db.query(Product).filter(
+        and_(
+            Product.id == product_id,
+            Product.company_id == user.company_id
+        )
+    ).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
     if divisor < 1:
@@ -716,9 +787,26 @@ def bulk_link_catalog(
 
 
 @router.delete("/{product_id}")
-def delete_product(product_id: UUID, db: Session = Depends(get_db)):
+def delete_product(
+    product_id: UUID,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
     """Odebere produkt ze sledování - katalogový záznam zůstane zachován"""
-    product = db.query(Product).filter(Product.id == product_id).first()
+    from app.models import User
+    from sqlalchemy import and_
+
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    product = db.query(Product).filter(
+        and_(
+            Product.id == product_id,
+            Product.company_id == user.company_id
+        )
+    ).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
@@ -730,7 +818,29 @@ def delete_product(product_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/{product_id}/prices", response_model=list[PriceResponse])
-def get_product_prices(product_id: UUID, db: Session = Depends(get_db)):
+def get_product_prices(
+    product_id: UUID,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
+    from app.models import User
+    from sqlalchemy import and_
+
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    # Verify product belongs to user's company
+    product = db.query(Product).filter(
+        and_(
+            Product.id == product_id,
+            Product.company_id == user.company_id
+        )
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
     prices = db.query(Price).filter(
         Price.product_id == product_id
     ).order_by(desc(Price.changed_at)).limit(30).all()
@@ -738,9 +848,27 @@ def get_product_prices(product_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/{product_id}/prices", response_model=PriceResponse)
-def set_product_price(product_id: UUID, price_data: PriceCreate, db: Session = Depends(get_db)):
+def set_product_price(
+    product_id: UUID,
+    price_data: PriceCreate,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
     """Nastav cenu produktu ručně"""
-    product = db.query(Product).filter(Product.id == product_id).first()
+    from app.models import User
+    from sqlalchemy import and_
+
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    product = db.query(Product).filter(
+        and_(
+            Product.id == product_id,
+            Product.company_id == user.company_id
+        )
+    ).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
@@ -758,11 +886,27 @@ def set_product_price(product_id: UUID, price_data: PriceCreate, db: Session = D
 
 
 @router.post("/{product_id}/competitor-urls")
-async def add_competitor_url(product_id: UUID, payload: CompetitorUrlAdd, db: Session = Depends(get_db)):
-    from app.models import CompetitorProductPrice, CompetitorPriceHistory
+async def add_competitor_url(
+    product_id: UUID,
+    payload: CompetitorUrlAdd,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
+    from app.models import CompetitorProductPrice, CompetitorPriceHistory, User
     from app.competitor_scraper import scrape_competitor_price
+    from sqlalchemy import and_
 
-    product = db.query(Product).filter(Product.id == product_id).first()
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    product = db.query(Product).filter(
+        and_(
+            Product.id == product_id,
+            Product.company_id == user.company_id
+        )
+    ).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
@@ -815,8 +959,26 @@ async def add_competitor_url(product_id: UUID, payload: CompetitorUrlAdd, db: Se
 
 
 @router.delete("/{product_id}/competitor-urls")
-def remove_competitor_url(product_id: UUID, url: str, db: Session = Depends(get_db)):
-    product = db.query(Product).filter(Product.id == product_id).first()
+def remove_competitor_url(
+    product_id: UUID,
+    url: str,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
+    from app.models import User
+    from sqlalchemy import and_
+
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    product = db.query(Product).filter(
+        and_(
+            Product.id == product_id,
+            Product.company_id == user.company_id
+        )
+    ).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
