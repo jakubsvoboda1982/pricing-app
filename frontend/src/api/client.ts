@@ -50,6 +50,14 @@ export class APIClient {
     const response = await fetch(url, options)
 
     if (!response.ok) {
+      // Token vypršel nebo je neplatný - přesměruj na login
+      if (response.status === 401) {
+        this.clearToken()
+        if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+          window.location.href = '/login'
+        }
+        throw new Error('Relace vypršela. Prosím přihlaš se znovu.')
+      }
       // Přečti detail chyby z JSON těla (FastAPI vrací { "detail": "..." })
       try {
         const errBody = await response.json()
