@@ -831,12 +831,21 @@ export default function ProductDetailPage() {
             className="flex items-center gap-1.5 text-sm text-purple-600 hover:text-purple-800 border border-purple-200 hover:border-purple-300 px-3 py-1.5 rounded-lg transition bg-white">
             <Play size={13} /> Simulátor co-když
           </button>
-          {product.url_reference && (
-            <a href={product.url_reference} target="_blank" rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-300 px-3 py-1.5 rounded-lg transition bg-white">
-              <ExternalLink size={13} /> Na e-shopu
-            </a>
-          )}
+          {product.url_reference && (() => {
+            // Market-aware eshop URL: CZ = url_reference, SK = nutie.sk, atd.
+            const eshopUrl = activeMarket === 'SK'
+              ? product.url_reference!.replace(/nutie\.cz/gi, 'nutie.sk')
+              : activeMarket === 'HU'
+                ? product.url_reference!.replace(/nutie\.cz/gi, 'nutie.hu')
+                : product.url_reference!
+            const flag = MARKET_FLAG[activeMarket] ?? ''
+            return (
+              <a href={eshopUrl} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-300 px-3 py-1.5 rounded-lg transition bg-white">
+                <ExternalLink size={13} /> {flag} Na e-shopu
+              </a>
+            )
+          })()}
         </div>
       </div>
 
