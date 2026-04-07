@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
 from app.database import get_db
+from app.middleware.auth import verify_token
 from app.models import Competitor, CompetitorPrice, CompetitorRank, CompetitorAlert, Company
 from app.schemas.competitor import (
     CompetitorCreate, CompetitorUpdate, CompetitorResponse,

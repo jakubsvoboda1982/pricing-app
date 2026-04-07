@@ -167,6 +167,14 @@ async def refresh_competitor_prices(
 
     for comp_price in comp_prices:
         try:
+            # Verify comp_price still exists (may have been deleted)
+            comp_price_check = db.query(CompetitorProductPrice).filter(
+                CompetitorProductPrice.id == comp_price.id
+            ).first()
+            if not comp_price_check:
+                logger.warning(f"CompetitorProductPrice {comp_price.id} was deleted, skipping")
+                continue
+
             price = await scrape_competitor_price(comp_price.competitor_url)
 
             if price is not None:
