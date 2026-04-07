@@ -21,11 +21,14 @@ const FALLBACK_PRODUCTS: Product[] = [
 
 export default function SimulatorPage() {
   const location = useLocation()
+  const locationState = (location.state as any) ?? {}
   const [selectedProductId, setSelectedProductId] = useState<string | null>(
-    (location.state as any)?.selectedProductId || null
+    locationState.selectedProductId || null
   )
   const [priceChange, setPriceChange] = useState(0)
-  const [marginTarget, setMarginTarget] = useState(28)
+  const [marginTarget, setMarginTarget] = useState<number>(
+    locationState.baseMargin != null ? Number(locationState.baseMargin) : 28
+  )
   const [elasticity, setElasticity] = useState(1)
 
   const { data: products = FALLBACK_PRODUCTS, isLoading: productsLoading } = useQuery({
@@ -42,7 +45,17 @@ export default function SimulatorPage() {
   })
 
   const activeProductId = selectedProductId || products[0]?.id || FALLBACK_PRODUCTS[0].id
-  const product = products.find(p => p.id === activeProductId) || products[0]
+  const rawProduct = products.find(p => p.id === activeProductId) || products[0]
+  // Pokud přišel produkt z detailu, přepiš základní cenu a marži
+  const product: Product = {
+    ...rawProduct,
+    base_price: locationState.basePrice != null && selectedProductId === locationState.selectedProductId
+      ? Number(locationState.basePrice)
+      : rawProduct.base_price,
+    base_margin: locationState.baseMargin != null && selectedProductId === locationState.selectedProductId
+      ? Number(locationState.baseMargin)
+      : rawProduct.base_margin,
+  }
 
   const newPrice = product.base_price + priceChange
   const priceChangePercent = (priceChange / product.base_price) * 100

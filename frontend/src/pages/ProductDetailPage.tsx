@@ -821,12 +821,23 @@ export default function ProductDetailPage() {
           <span className="text-gray-300">/</span>
           <span className="text-gray-900 font-medium truncate max-w-xs">{displayName}</span>
         </button>
-        {product.url_reference && (
-          <a href={product.url_reference} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-300 px-3 py-1.5 rounded-lg transition bg-white">
-            <ExternalLink size={13} /> Na e-shopu
-          </a>
-        )}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/simulator', { state: {
+              selectedProductId: product.id,
+              basePrice: product.current_price ?? undefined,
+              baseMargin: product.margin ?? undefined,
+            }})}
+            className="flex items-center gap-1.5 text-sm text-purple-600 hover:text-purple-800 border border-purple-200 hover:border-purple-300 px-3 py-1.5 rounded-lg transition bg-white">
+            <Play size={13} /> Simulátor co-když
+          </button>
+          {product.url_reference && (
+            <a href={product.url_reference} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-300 px-3 py-1.5 rounded-lg transition bg-white">
+              <ExternalLink size={13} /> Na e-shopu
+            </a>
+          )}
+        </div>
       </div>
 
       {/* ── PRODUCT HEADER ─────────────────────────────────────────────── */}
@@ -1400,10 +1411,15 @@ export default function ProductDetailPage() {
 
                       {/* Name + link */}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-800 truncate">{item.name || getDomain(item.url)}</p>
                         <a href={item.url} target="_blank" rel="noopener noreferrer"
-                          className="text-xs text-blue-500 hover:underline flex items-center gap-0.5 truncate">
-                          <ExternalLink size={9} className="flex-shrink-0" /> {getDomain(item.url)}
+                          className="text-sm font-medium text-gray-800 hover:text-blue-600 flex items-center gap-1 truncate group">
+                          {item.name || getDomain(item.url)}
+                          <ExternalLink size={10} className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </a>
+                        <a href={item.url} target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-blue-400 hover:text-blue-600 hover:underline flex items-center gap-0.5 truncate mt-0.5">
+                          <ExternalLink size={9} className="flex-shrink-0" />
+                          <span className="truncate">{item.url.replace(/^https?:\/\//, '')}</span>
                         </a>
                       </div>
 
