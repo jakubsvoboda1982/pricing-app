@@ -832,11 +832,11 @@ export default function ProductDetailPage() {
             <Play size={13} /> Simulátor co-když
           </button>
           {product.url_reference && (() => {
-            // Market-aware eshop URL: CZ = url_reference, SK = nutie.sk, atd.
+            // Market-aware eshop URL: CZ = nuties.cz, SK = nuties.sk, HU = nuties.hu
             const eshopUrl = activeMarket === 'SK'
-              ? product.url_reference!.replace(/nutie\.cz/gi, 'nutie.sk')
+              ? product.url_reference!.replace(/nuties\.cz/gi, 'nuties.sk')
               : activeMarket === 'HU'
-                ? product.url_reference!.replace(/nutie\.cz/gi, 'nutie.hu')
+                ? product.url_reference!.replace(/nuties\.cz/gi, 'nuties.hu')
                 : product.url_reference!
             const flag = MARKET_FLAG[activeMarket] ?? ''
             return (
