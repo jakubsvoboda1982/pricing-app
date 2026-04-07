@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TrendingUp, AlertCircle, Zap, Target, BarChart2 } from 'lucide-react'
-import { API_BASE_URL } from '@/api/client'
+import { API_BASE_URL, authFetch } from '@/api/client'
 import { useMarketStore } from '@/store/market'
 import MarketSelector from '@/components/MarketSelector'
 
@@ -38,7 +38,7 @@ export default function OpportunitiesPage() {
     queryKey: ['opportunities'],
     queryFn: async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/opportunities/`)
+        const response = await authFetch(`${API_BASE_URL}/opportunities/`)
         if (!response.ok) throw new Error('Failed')
         return await response.json() as Opportunity[]
       } catch {

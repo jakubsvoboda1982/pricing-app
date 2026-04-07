@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Upload, CheckCircle, AlertCircle, Link, Plus, Trash2, RefreshCw, Globe } from 'lucide-react'
-import { apiClient, API_BASE_URL } from '@/api/client'
+import { apiClient, API_BASE_URL, authFetch } from '@/api/client'
 
 interface FeedSubscription {
   id: string
@@ -81,7 +81,7 @@ export default function ImportPage() {
       } else {
         const formData = new FormData()
         formData.append('file', file)
-        const response = await fetch(`${API_BASE_URL}/catalog/import`, {
+        const response = await authFetch(`${API_BASE_URL}/catalog/import`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` },
           body: formData,

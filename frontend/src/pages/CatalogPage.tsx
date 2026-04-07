@@ -6,7 +6,7 @@ import {
   ArrowUpDown, ArrowUp, ArrowDown, X, Eye, SlidersHorizontal, Weight,
   Bookmark, Tag, Star, Save,
 } from 'lucide-react'
-import { apiClient, API_BASE_URL } from '@/api/client'
+import { apiClient, API_BASE_URL, authFetch } from '@/api/client'
 import { useMarketStore } from '@/store/market'
 
 // Parse weight (in grams) from product name, e.g. "Ananas 500 g" → 500, "Kešu 1 kg" → 1000
@@ -143,7 +143,7 @@ export default function CatalogPage() {
     queryFn: async () => {
       const params = new URLSearchParams()
       if (selectedMarket && selectedMarket !== 'ALL') params.set('market', selectedMarket)
-      const r = await fetch(`${API_BASE_URL}/catalog/categories?${params.toString()}`)
+      const r = await authFetch(`${API_BASE_URL}/catalog/categories?${params.toString()}`)
       if (!r.ok) return []
       return r.json()
     },
@@ -156,7 +156,7 @@ export default function CatalogPage() {
     queryKey: ['catalogManufacturers'],
     queryFn: async () => {
       try {
-        const r = await fetch(`${API_BASE_URL}/catalog/manufacturers`)
+        const r = await authFetch(`${API_BASE_URL}/catalog/manufacturers`)
         if (!r.ok) return []
         return r.json()
       } catch {
@@ -188,7 +188,7 @@ export default function CatalogPage() {
       if (priceRange.min != null) params.append('min_price', String(priceRange.min))
       if (priceRange.max != null) params.append('max_price', String(priceRange.max))
       params.append('limit', String(limit))
-      const r = await fetch(`${API_BASE_URL}/catalog/products?${params.toString()}`)
+      const r = await authFetch(`${API_BASE_URL}/catalog/products?${params.toString()}`)
       if (!r.ok) return []
       return r.json()
     },

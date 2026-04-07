@@ -4,7 +4,7 @@ import {
   TrendingUp, TrendingDown, Package, Star, AlertCircle, ArrowRight,
   BarChart2, Target, Upload, Zap, ShoppingBag,
 } from 'lucide-react'
-import { API_BASE_URL } from '@/api/client'
+import { API_BASE_URL, authFetch } from '@/api/client'
 
 interface Product {
   id: string; name: string; sku: string; product_code?: string | null
@@ -22,7 +22,7 @@ export default function DashboardPage() {
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ['dashboardProducts'],
     queryFn: async () => {
-      const r = await fetch(`${API_BASE_URL}/products/`)
+      const r = await authFetch(`${API_BASE_URL}/products/`)
       if (!r.ok) return []
       return r.json()
     },

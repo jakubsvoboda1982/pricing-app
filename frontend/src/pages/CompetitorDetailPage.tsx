@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ExternalLink, RefreshCw, Edit2, Save, X, Globe, Mail, Phone, MapPin, CheckCircle, AlertCircle } from 'lucide-react'
-import { API_BASE_URL } from '@/api/client'
+import { API_BASE_URL, authFetch } from '@/api/client'
 
 interface CompetitorDetail {
   id: string
@@ -54,7 +54,7 @@ export default function CompetitorDetailPage() {
   const { data: competitor, isLoading, error } = useQuery({
     queryKey: ['competitor', id],
     queryFn: async () => {
-      const response = await fetch(`${API_BASE_URL}/competitors/${id}`, {
+      const response = await authFetch(`${API_BASE_URL}/competitors/${id}`, {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
       })
       if (!response.ok) throw new Error('Chyba při načítání')
@@ -66,7 +66,7 @@ export default function CompetitorDetailPage() {
 
   const updateMutation = useMutation({
     mutationFn: async (data: Partial<CompetitorDetail>) => {
-      const response = await fetch(`${API_BASE_URL}/competitors/${id}`, {
+      const response = await authFetch(`${API_BASE_URL}/competitors/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -86,7 +86,7 @@ export default function CompetitorDetailPage() {
 
   const rescrapeMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`${API_BASE_URL}/competitors/${id}/rescrape`, {
+      const response = await authFetch(`${API_BASE_URL}/competitors/${id}/rescrape`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
       })

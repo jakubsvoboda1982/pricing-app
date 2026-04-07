@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronUp, AlertCircle, CheckCircle, BarChart2,
   Scale, Play, XCircle,
 } from 'lucide-react'
-import { API_BASE_URL, apiClient } from '@/api/client'
+import { API_BASE_URL, apiClient, authFetch } from '@/api/client'
 
 // ── Multi-market helpers ──────────────────────────────────────────────────
 const EXCHANGE: Record<string, number> = {
@@ -175,7 +175,7 @@ function ConfirmedMatchesSection({ productId }: { productId: string }) {
   const { data: competitors = [] } = useQuery<CompetitorOption[]>({
     queryKey: ['competitors-list'],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE_URL}/competitors`, {
+      const res = await authFetch(`${API_BASE_URL}/competitors`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
       })
       if (!res.ok) return []
@@ -189,7 +189,7 @@ function ConfirmedMatchesSection({ productId }: { productId: string }) {
   const { data: activeMatches = [], isLoading, refetch } = useQuery<ProductMatch[]>({
     queryKey: ['product-matches-active', productId],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE_URL}/matching/product/${productId}/matches?status=active`, { headers: authHeaders() })
+      const res = await authFetch(`${API_BASE_URL}/matching/product/${productId}/matches?status=active`, { headers: authHeaders() })
       if (!res.ok) return []
       return res.json()
     },
@@ -201,7 +201,7 @@ function ConfirmedMatchesSection({ productId }: { productId: string }) {
   const { data: proposedMatches = [] } = useQuery<ProductMatch[]>({
     queryKey: ['product-matches-proposed', productId],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE_URL}/matching/product/${productId}/matches?status=proposed`, { headers: authHeaders() })
+      const res = await authFetch(`${API_BASE_URL}/matching/product/${productId}/matches?status=proposed`, { headers: authHeaders() })
       if (!res.ok) return []
       return res.json()
     },
@@ -496,7 +496,7 @@ export default function ProductDetailPage() {
   const { data: product, isLoading } = useQuery({
     queryKey: ['product', id],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE_URL}/products/${id}`, { headers: authHeaders() })
+      const res = await authFetch(`${API_BASE_URL}/products/${id}`, { headers: authHeaders() })
       if (!res.ok) throw new Error('Chyba')
       return await res.json() as Product
     },
@@ -515,7 +515,7 @@ export default function ProductDetailPage() {
     setSavingDivisor(true)
     try {
       // Dedikovaný endpoint — žádná ambiguita s ostatními poli
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE_URL}/products/${id}/stock-divisor?divisor=${n}`,
         { method: 'PATCH', headers: authHeaders() }
       )
@@ -538,7 +538,7 @@ export default function ProductDetailPage() {
   const { data: prices = [] } = useQuery({
     queryKey: ['product-prices', id],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE_URL}/products/${id}/prices`, { headers: authHeaders() })
+      const res = await authFetch(`${API_BASE_URL}/products/${id}/prices`, { headers: authHeaders() })
       if (!res.ok) return []
       return await res.json() as PriceRecord[]
     },
@@ -547,7 +547,7 @@ export default function ProductDetailPage() {
   const { data: competitorPrices = [], refetch: refetchCompetitorPrices } = useQuery({
     queryKey: ['competitor-prices', id],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE_URL}/competitor-prices/${id}`, { headers: authHeaders() })
+      const res = await authFetch(`${API_BASE_URL}/competitor-prices/${id}`, { headers: authHeaders() })
       if (!res.ok) return []
       return await res.json() as CompetitorPriceRecord[]
     },
@@ -558,7 +558,7 @@ export default function ProductDetailPage() {
 
   const setPriceMutation = useMutation({
     mutationFn: async (data: { current_price: number; old_price?: number; market: string }) => {
-      const res = await fetch(`${API_BASE_URL}/products/${id}/prices`, {
+      const res = await authFetch(`${API_BASE_URL}/products/${id}/prices`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(data),
@@ -581,7 +581,7 @@ export default function ProductDetailPage() {
       manufacturing_cost?: number; min_price?: number
       clear_purchase_price?: boolean; clear_manufacturing_cost?: boolean
     }) => {
-      const res = await fetch(`${API_BASE_URL}/products/${id}/pricing`, {
+      const res = await authFetch(`${API_BASE_URL}/products/${id}/pricing`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(data),
@@ -598,7 +598,7 @@ export default function ProductDetailPage() {
 
   const removeUrlMutation = useMutation({
     mutationFn: async (url: string) => {
-      const res = await fetch(`${API_BASE_URL}/products/${id}/competitor-urls?url=${encodeURIComponent(url)}`, {
+      const res = await authFetch(`${API_BASE_URL}/products/${id}/competitor-urls?url=${encodeURIComponent(url)}`, {
         method: 'DELETE', headers: authHeaders(),
       })
       if (!res.ok) throw new Error('Chyba')
@@ -613,7 +613,7 @@ export default function ProductDetailPage() {
     if (!newUrl.trim()) return
     setAddingUrl(true)
     try {
-      const res = await fetch(`${API_BASE_URL}/products/${id}/competitor-urls`, {
+      const res = await authFetch(`${API_BASE_URL}/products/${id}/competitor-urls`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ url: newUrl, market: newUrlMarket }),
@@ -647,7 +647,7 @@ export default function ProductDetailPage() {
   }
 
   const handleRefreshUrl = async (url: string) => {
-    await fetch(`${API_BASE_URL}/competitor-prices/${id}/refresh-url?url=${encodeURIComponent(url)}`, {
+    await authFetch(`${API_BASE_URL}/competitor-prices/${id}/refresh-url?url=${encodeURIComponent(url)}`, {
       method: 'POST', headers: authHeaders(),
     })
     refetchCompetitorPrices()
@@ -655,7 +655,7 @@ export default function ProductDetailPage() {
   }
 
   const handleRefreshAll = async () => {
-    await fetch(`${API_BASE_URL}/competitor-prices/${id}/refresh`, {
+    await authFetch(`${API_BASE_URL}/competitor-prices/${id}/refresh`, {
       method: 'POST', headers: authHeaders(),
     })
     refetchCompetitorPrices()
@@ -665,7 +665,7 @@ export default function ProductDetailPage() {
   const handleSaveManualPrice = async (compPriceId: string) => {
     const price = parseFloat(manualPriceInput.replace(',', '.'))
     if (isNaN(price) || price <= 0) return
-    await fetch(`${API_BASE_URL}/competitor-prices/by-url/${compPriceId}/manual`, {
+    await authFetch(`${API_BASE_URL}/competitor-prices/by-url/${compPriceId}/manual`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ price }),
@@ -679,7 +679,7 @@ export default function ProductDetailPage() {
     if (expandedHistoryId === compPriceId) { setExpandedHistoryId(null); return }
     setExpandedHistoryId(compPriceId)
     if (!historyData[compPriceId]) {
-      const res = await fetch(`${API_BASE_URL}/competitor-prices/by-url/${compPriceId}/history`, { headers: authHeaders() })
+      const res = await authFetch(`${API_BASE_URL}/competitor-prices/by-url/${compPriceId}/history`, { headers: authHeaders() })
       if (res.ok) {
         const data = await res.json()
         setHistoryData(prev => ({ ...prev, [compPriceId]: data }))

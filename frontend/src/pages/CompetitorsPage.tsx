@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw, Trash2, ExternalLink, AlertCircle, Globe, WifiOff, Bell } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { API_BASE_URL } from '@/api/client'
+import { API_BASE_URL, authFetch } from '@/api/client'
 import MarketSelector from '@/components/MarketSelector'
 import { useMarketStore, shouldShowMarket } from '@/store/market'
 
@@ -38,7 +38,7 @@ export default function CompetitorsPage() {
       const params = new URLSearchParams()
       if (selectedCategory) params.set('category', selectedCategory)
       if (selectedMarket !== 'ALL') params.set('market', selectedMarket)
-      const response = await fetch(
+      const response = await authFetch(
         `${API_BASE_URL}/competitors${params.toString() ? `?${params.toString()}` : ''}`,
         { headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` } }
       )
@@ -49,7 +49,7 @@ export default function CompetitorsPage() {
 
   const addCompetitorMutation = useMutation({
     mutationFn: async (data: { url: string; market: string }) => {
-      const response = await fetch(`${API_BASE_URL}/competitors`, {
+      const response = await authFetch(`${API_BASE_URL}/competitors`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -77,7 +77,7 @@ export default function CompetitorsPage() {
 
   const deleteCompetitorMutation = useMutation({
     mutationFn: async (competitorId: string) => {
-      const response = await fetch(`${API_BASE_URL}/competitors/${competitorId}`, {
+      const response = await authFetch(`${API_BASE_URL}/competitors/${competitorId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
       })
@@ -91,7 +91,7 @@ export default function CompetitorsPage() {
 
   const rescrapeMutation = useMutation({
     mutationFn: async (competitorId: string) => {
-      const response = await fetch(`${API_BASE_URL}/competitors/${competitorId}/rescrape`, {
+      const response = await authFetch(`${API_BASE_URL}/competitors/${competitorId}/rescrape`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
       })

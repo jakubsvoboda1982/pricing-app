@@ -523,3 +523,25 @@ export class APIClient {
 }
 
 export const apiClient = new APIClient()
+
+// Helper: fetch s automatickým Authorization headerem
+// Použij všude místo přímého fetch() pro chráněné endpointy
+export function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const token = localStorage.getItem('access_token')
+  const headers = new Headers(options.headers)
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json')
+  }
+  return fetch(url, { ...options, headers }).then(res => {
+    if (res.status === 401) {
+      localStorage.removeItem('access_token')
+      if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+        window.location.href = '/login'
+      }
+    }
+    return res
+  })
+}
