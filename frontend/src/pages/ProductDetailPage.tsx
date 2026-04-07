@@ -482,6 +482,9 @@ export default function ProductDetailPage() {
   const [newUrl, setNewUrl] = useState('')
   const [newUrlMarket, setNewUrlMarket] = useState<'CZ' | 'SK'>('CZ')
   const [addingUrl, setAddingUrl] = useState(false)
+  const [editingUrlItem, setEditingUrlItem] = useState<string | null>(null)  // původní URL která se edituje
+  const [editingUrlInput, setEditingUrlInput] = useState('')
+  const [savingUrl, setSavingUrl] = useState(false)
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null)
   const [manualPriceInput, setManualPriceInput] = useState('')
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null)
@@ -652,6 +655,30 @@ export default function ProductDetailPage() {
     })
     refetchCompetitorPrices()
     queryClient.invalidateQueries({ queryKey: ['product', id] })
+  }
+
+  const handleSaveEditedUrl = async (oldUrl: string, item: CompetitorUrl) => {
+    const newUrlTrimmed = editingUrlInput.trim()
+    if (!newUrlTrimmed || newUrlTrimmed === oldUrl) { setEditingUrlItem(null); return }
+    setSavingUrl(true)
+    try {
+      // Smaž starou URL
+      await authFetch(`${API_BASE_URL}/products/${id}/competitor-urls?url=${encodeURIComponent(oldUrl)}`, {
+        method: 'DELETE', headers: authHeaders(),
+      })
+      // Přidej novou URL se stejným trhem
+      await authFetch(`${API_BASE_URL}/products/${id}/competitor-urls`, {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ url: newUrlTrimmed, market: item.market }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['product', id] })
+      refetchCompetitorPrices()
+      setEditingUrlItem(null)
+    } catch (e: any) {
+      alert(e.message || 'Chyba při ukládání URL')
+    } finally {
+      setSavingUrl(false)
+    }
   }
 
   const handleRefreshAll = async () => {
@@ -1425,6 +1452,12 @@ export default function ProductDetailPage() {
                             {isHistoryOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                           </button>
                         )}
+                        <button
+                          onClick={() => { setEditingUrlItem(editingUrlItem === item.url ? null : item.url); setEditingUrlInput(item.url) }}
+                          title="Změnit URL"
+                          className={`p-1.5 rounded-lg transition ${editingUrlItem === item.url ? 'text-orange-600 bg-white' : 'text-gray-400 hover:text-orange-500 hover:bg-white'}`}>
+                          <Link2 size={13} />
+                        </button>
                         <button onClick={() => removeUrlMutation.mutate(item.url)} title="Odebrat"
                           className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-white rounded-lg transition">
                           <Trash2 size={13} />
@@ -1437,6 +1470,34 @@ export default function ProductDetailPage() {
                       <p className="px-4 pb-2 text-xs text-red-500 flex items-center gap-1">
                         <AlertCircle size={10} /> {priceRecord.fetch_error}
                       </p>
+                    )}
+
+                    {/* Edit URL */}
+                    {editingUrlItem === item.url && (
+                      <div className="px-4 pb-3 pt-2 border-t border-orange-100 bg-orange-50 flex items-end gap-2">
+                        <div className="flex-1">
+                          <label className="text-xs text-orange-700 font-medium">Nová URL produktu konkurenta</label>
+                          <input
+                            type="url"
+                            value={editingUrlInput}
+                            onChange={e => setEditingUrlInput(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') handleSaveEditedUrl(item.url, item); if (e.key === 'Escape') setEditingUrlItem(null) }}
+                            className="mt-1 w-full border border-orange-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                            placeholder="https://..."
+                            autoFocus
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleSaveEditedUrl(item.url, item)}
+                          disabled={savingUrl}
+                          className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-medium transition disabled:opacity-50">
+                          {savingUrl ? '...' : 'Uložit'}
+                        </button>
+                        <button onClick={() => setEditingUrlItem(null)}
+                          className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg">
+                          <X size={14} />
+                        </button>
+                      </div>
                     )}
 
                     {/* Manual price edit */}
