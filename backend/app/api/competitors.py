@@ -19,17 +19,30 @@ logger = logging.getLogger(__name__)
 
 @router.get("", response_model=list[CompetitorListResponse])
 def get_competitors(
-    db: Session = Depends(get_db),
     category: str = None,
     market: str = None,
     is_active: bool = True,
     skip: int = 0,
-    limit: int = 50
+    limit: int = 50,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
 ):
     """Načti seznam konkurentů s filtry"""
     from sqlalchemy import func, and_
+    from app.models import User
 
-    query = db.query(Competitor).filter(Competitor.is_active == is_active)
+    # Ověř uživatele a filtruj podle jeho společnosti
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    query = db.query(Competitor).filter(
+        and_(
+            Competitor.is_active == is_active,
+            Competitor.company_id == user.company_id
+        )
+    )
 
     if category:
         query = query.filter(Competitor.category == category)
@@ -209,9 +222,9 @@ def add_competitor(
 @router.get("/{competitor_id}", response_model=CompetitorDetailResponse)
 def get_competitor_detail(
     competitor_id: str,
+    days_back: int = 30,
     token_payload: dict = Depends(verify_token),
-    db: Session = Depends(get_db),
-    days_back: int = 30
+    db: Session = Depends(get_db)
 ):
     """Načti detaily konkurenta včetně cen, rankingu a upozornění"""
     from app.models import User
@@ -402,10 +415,10 @@ async def rescrape_competitor(
 @router.get("/{competitor_id}/prices", response_model=list[CompetitorPriceResponse])
 def get_competitor_prices(
     competitor_id: str,
-    token_payload: dict = Depends(verify_token),
-    db: Session = Depends(get_db),
     days_back: int = 30,
-    market: str = None
+    market: str = None,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
 ):
     """Načti historii cen konkurenta"""
     from app.models import User
@@ -443,12 +456,12 @@ def get_competitor_prices(
 
 @router.get("/alerts", response_model=list[CompetitorAlertResponse])
 def get_alerts(
-    token_payload: dict = Depends(verify_token),
-    db: Session = Depends(get_db),
     competitor_id: str = None,
     is_read: bool = False,
     skip: int = 0,
-    limit: int = 50
+    limit: int = 50,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
 ):
     """Načti upozornění konkurentů"""
     from app.models import User
