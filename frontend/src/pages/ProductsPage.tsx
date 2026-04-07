@@ -4,6 +4,7 @@ import { Search, Plus, Link2, Upload, Trash2, ExternalLink, Package, AlertCircle
 import { apiClient } from '@/api/client'
 import { useNavigate } from 'react-router-dom'
 import { useMarketStore, shouldShowMarket } from '@/store/market'
+import { useDisplayStore } from '@/store/display'
 
 interface CompetitorUrl { url: string; name: string; market: string }
 
@@ -20,6 +21,7 @@ interface Product {
   catalog_quantity_in_stock?: number | null
   market_names?: Record<string, string>
   stock_divisor?: number | null
+  prices_by_market?: Record<string, { price: number | null; currency: string }>
   created_at: string
 }
 
@@ -53,6 +55,7 @@ export default function ProductsPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const selectedMarket = useMarketStore(state => state.selectedMarket)
+  const { viewMode } = useDisplayStore()
 
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['products'],
@@ -333,10 +336,21 @@ export default function ProductsPage() {
               <input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded border-gray-300" />
             </div>
             <div className="flex-1">Produkt</div>
-            <div className="w-28 text-right">Cena</div>
-            <div className="w-24 text-right">Skladem</div>
-            <div className="w-32 text-right">Konkurence</div>
-            <div className="w-24 text-right">Marže</div>
+            {viewMode === 'tabs' ? (
+              <>
+                <div className="w-28 text-right">Cena</div>
+                <div className="w-24 text-right">Skladem</div>
+                <div className="w-32 text-right">Konkurence</div>
+                <div className="w-24 text-right">Marže</div>
+              </>
+            ) : (
+              <>
+                <div className="w-24 text-right">Sklad</div>
+                <div className="w-28 text-right">🇨🇿 CZ</div>
+                <div className="w-28 text-right">🇸🇰 SK</div>
+                <div className="w-24 text-right">Marže</div>
+              </>
+            )}
             <div className="w-28 text-right">Hero</div>
             <div className="w-20 text-right">Akce</div>
           </div>
@@ -399,6 +413,8 @@ export default function ProductsPage() {
                       </div>
                     </div>
 
+                    {viewMode === 'tabs' ? (
+                      <>
                     {/* Price */}
                     <div className="w-28 text-right flex-shrink-0">
                       {cp != null ? (
@@ -469,6 +485,60 @@ export default function ProductsPage() {
                         }`}>{Number(product.margin).toFixed(1)} %</span>
                       ) : <span className="text-sm text-gray-300">—</span>}
                     </div>
+                      </>
+                    ) : (
+                      <>
+                    {/* Sklad (multi mode) */}
+                    <div className="w-24 text-right flex-shrink-0">
+                      {(() => {
+                        const rawQty = product.stock_quantity ?? product.catalog_quantity_in_stock
+                        const divisor = (product.stock_divisor ?? 1) >= 1 ? (product.stock_divisor ?? 1) : 1
+                        const qty = rawQty != null ? Math.floor(rawQty / divisor) : null
+                        if (qty == null) return <span className="text-xs text-gray-300">—</span>
+                        return (
+                          <span className={`text-sm font-semibold ${qty > 10 ? 'text-green-700' : qty > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
+                            {qty} ks
+                          </span>
+                        )
+                      })()}
+                    </div>
+                    {/* CZ price (multi mode) */}
+                    <div className="w-28 text-right flex-shrink-0">
+                      {(() => {
+                        const czData = product.prices_by_market?.['CZ']
+                        if (!czData) return <span className="text-xs text-gray-300">—</span>
+                        return (
+                          <span className="text-sm font-semibold text-gray-800">
+                            {czData.price != null ? `${czData.price.toLocaleString('cs-CZ', { maximumFractionDigits: 0 })} Kč` : '—'}
+                          </span>
+                        )
+                      })()}
+                    </div>
+                    {/* SK price (multi mode) */}
+                    <div className="w-28 text-right flex-shrink-0">
+                      {(() => {
+                        const skData = product.prices_by_market?.['SK']
+                        if (!skData) return <span className="text-xs text-gray-300">—</span>
+                        return (
+                          <span className="text-sm font-semibold text-blue-700">
+                            {skData.price != null ? `${skData.price.toLocaleString('sk-SK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : '—'}
+                          </span>
+                        )
+                      })()}
+                    </div>
+                    {/* Margin (multi mode) */}
+                    <div className="w-24 text-right flex-shrink-0">
+                      {product.margin != null ? (
+                        <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${
+                          Number(product.margin) >= 20 ? 'bg-green-100 text-green-700'
+                          : Number(product.margin) >= 10 ? 'bg-yellow-100 text-yellow-700'
+                          : Number(product.margin) > 0 ? 'bg-orange-100 text-orange-700'
+                          : 'bg-red-100 text-red-700'
+                        }`}>{Number(product.margin).toFixed(1)} %</span>
+                      ) : <span className="text-sm text-gray-300">—</span>}
+                    </div>
+                      </>
+                    )}
 
                     {/* Hero */}
                     <div className="w-28 text-right flex-shrink-0">

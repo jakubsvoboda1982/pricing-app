@@ -1,13 +1,16 @@
 import { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
-import { Menu, LogOut, BarChart3, Package, Users, AlertCircle, Download, Upload, Menu as MenuIcon, Shield, Zap, Calendar, ChevronRight, ArrowLeft, Link2, Scale } from 'lucide-react'
+import { Menu, LogOut, BarChart3, Package, Users, AlertCircle, Download, Upload, Menu as MenuIcon, Shield, Zap, Calendar, ChevronRight, ArrowLeft, Link2, Scale, Layers, Filter } from 'lucide-react'
+import { useDisplayStore } from '@/store/display'
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
   const { logout, user } = useAuthStore()
+  const { viewMode, setViewMode } = useDisplayStore()
 
   const handleLogout = () => {
     logout()
@@ -178,8 +181,68 @@ export default function Layout() {
                 <option>EN</option>
               </select>
 
-              <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold cursor-pointer hover:bg-blue-700 transition">
-                JS
+              <div className="relative">
+                <button
+                  onClick={() => setUserMenuOpen(v => !v)}
+                  className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold cursor-pointer hover:bg-blue-700 transition select-none"
+                >
+                  {(user?.email?.[0] ?? 'U').toUpperCase()}
+                </button>
+
+                {userMenuOpen && (
+                  <>
+                    {/* Backdrop */}
+                    <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />
+                    {/* Menu */}
+                    <div className="absolute right-0 top-12 w-72 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                      {/* User info */}
+                      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{user?.email ?? '—'}</p>
+                        <p className="text-xs text-gray-400 mt-0.5 capitalize">{user?.role ?? 'uživatel'}</p>
+                      </div>
+
+                      {/* Volba zobrazení */}
+                      <div className="px-4 py-3 border-b border-gray-100">
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Volba zobrazení</p>
+                        <div className="space-y-1">
+                          <button
+                            onClick={() => { setViewMode('tabs'); setUserMenuOpen(false) }}
+                            className={`w-full text-left px-3 py-2 rounded-lg flex items-start gap-2.5 transition ${viewMode === 'tabs' ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50 border border-transparent'}`}
+                          >
+                            <Filter size={14} className={`mt-0.5 flex-shrink-0 ${viewMode === 'tabs' ? 'text-blue-600' : 'text-gray-400'}`} />
+                            <div>
+                              <p className={`text-sm font-medium ${viewMode === 'tabs' ? 'text-blue-700' : 'text-gray-700'}`}>Market tabs</p>
+                              <p className="text-xs text-gray-400 mt-0.5">Jeden trh najednou, přepínání záložkami</p>
+                            </div>
+                            {viewMode === 'tabs' && <div className="ml-auto w-2 h-2 rounded-full bg-blue-500 mt-1.5 flex-shrink-0" />}
+                          </button>
+                          <button
+                            onClick={() => { setViewMode('multi'); setUserMenuOpen(false) }}
+                            className={`w-full text-left px-3 py-2 rounded-lg flex items-start gap-2.5 transition ${viewMode === 'multi' ? 'bg-purple-50 border border-purple-200' : 'hover:bg-gray-50 border border-transparent'}`}
+                          >
+                            <Layers size={14} className={`mt-0.5 flex-shrink-0 ${viewMode === 'multi' ? 'text-purple-600' : 'text-gray-400'}`} />
+                            <div>
+                              <p className={`text-sm font-medium ${viewMode === 'multi' ? 'text-purple-700' : 'text-gray-700'}`}>Multi-trh</p>
+                              <p className="text-xs text-gray-400 mt-0.5">Všechny trhy najednou v sloupcích</p>
+                            </div>
+                            {viewMode === 'multi' && <div className="ml-auto w-2 h-2 rounded-full bg-purple-500 mt-1.5 flex-shrink-0" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Odhlásit */}
+                      <div className="px-4 py-2">
+                        <button
+                          onClick={() => { handleLogout(); setUserMenuOpen(false) }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition"
+                        >
+                          <LogOut size={14} />
+                          Odhlásit se
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

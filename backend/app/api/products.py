@@ -109,6 +109,7 @@ def _enrich_with_price(
     _price=None,       # pre-loaded Price (batch optimisation)
     _comp_prices=None, # pre-loaded list[CompetitorProductPrice]
     _cat=None,         # pre-loaded CatalogProduct
+    _prices_by_market=None,  # pre-loaded dict {market: {price, currency}}
 ) -> dict:
     """
     Přidej poslední cenu, marži a hero score k produktu.
@@ -272,6 +273,8 @@ def _enrich_with_price(
         'catalog_quantity_in_stock': catalog_quantity_in_stock,
         'market_names': getattr(product, 'market_names_json', None) or {},
         'stock_divisor': getattr(product, 'stock_divisor', None) or 1,
+        'prices_by_market': _prices_by_market or {},
+        'manufacturing_cost_with_vat': manufacturing_cost_with_vat,
         'created_at': product.created_at,
         'updated_at': product.updated_at,
     }
@@ -329,12 +332,38 @@ def list_products(
         cats = db.query(CatalogProduct).filter(CatalogProduct.id.in_(catalog_ids)).all()
         cat_map = {str(c.id): c for c in cats}
 
+    # 4. Latest price per product per market (for multi-market view)
+    from sqlalchemy import and_
+    latest_per_mkt_subq = (
+        db.query(Price.product_id, Price.market, func.max(Price.changed_at).label("max_ts"))
+        .filter(Price.product_id.in_(product_ids))
+        .group_by(Price.product_id, Price.market)
+        .subquery()
+    )
+    all_mkt_prices = (
+        db.query(Price)
+        .join(latest_per_mkt_subq, and_(
+            Price.product_id == latest_per_mkt_subq.c.product_id,
+            Price.market == latest_per_mkt_subq.c.market,
+            Price.changed_at == latest_per_mkt_subq.c.max_ts,
+        ))
+        .all()
+    )
+    mkt_price_map: dict = defaultdict(dict)
+    for mp in all_mkt_prices:
+        mkt_price_map[str(mp.product_id)][mp.market] = {
+            'price': float(mp.current_price) if mp.current_price is not None else None,
+            'old_price': float(mp.old_price) if mp.old_price is not None else None,
+            'currency': mp.currency or 'CZK',
+        }
+
     return [
         ProductResponse(**_enrich_with_price(
             p, db,
             _price=price_map.get(str(p.id)),
             _comp_prices=comp_map.get(str(p.id), []),
             _cat=cat_map.get(str(p.catalog_product_id)) if p.catalog_product_id else None,
+            _prices_by_market=mkt_price_map.get(str(p.id), {}),
         ))
         for p in products
     ]

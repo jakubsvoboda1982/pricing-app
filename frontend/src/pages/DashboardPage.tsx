@@ -1,11 +1,13 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   TrendingUp, TrendingDown, Package, Star, AlertCircle, ArrowRight,
   BarChart2, Target, Upload, Zap, ShoppingBag, ArrowDown, ArrowUp,
-  Minus, Warehouse,
+  Minus, Warehouse, ExternalLink,
 } from 'lucide-react'
 import { API_BASE_URL, authFetch } from '@/api/client'
+import { useDisplayStore } from '@/store/display'
 
 interface Product {
   id: string; name: string; sku: string; product_code?: string | null
@@ -16,6 +18,7 @@ interface Product {
   market?: string; currency?: string
   competitor_urls?: { url: string; name: string; market: string }[]
   stock_quantity?: number | null; stock_divisor?: number | null
+  prices_by_market?: Record<string, { price: number | null; old_price?: number | null; currency: string }>
 }
 
 // Formát ceny s měnou trhu
@@ -42,6 +45,8 @@ function getEffectiveStock(p: Product): number | null {
 
 export default function DashboardPage() {
   const navigate = useNavigate()
+  const { viewMode } = useDisplayStore()
+  const [dashMarket, setDashMarket] = useState<'ALL' | 'CZ' | 'SK'>('ALL')
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ['dashboardProducts'],
@@ -74,7 +79,11 @@ export default function DashboardPage() {
     .sort((a, b) => Number(a.hero_score) - Number(b.hero_score)).slice(0, 8)
   const topProducts     = [...products].filter(p => p.hero_score != null)
     .sort((a, b) => Number(b.hero_score) - Number(a.hero_score)).slice(0, 8)
-  const displayList     = needAttention.length > 0 ? needAttention : topProducts
+  const baseList        = needAttention.length > 0 ? needAttention : topProducts
+  // In tabs mode filter by selected market; in multi mode show all
+  const displayList     = viewMode === 'tabs' && dashMarket !== 'ALL'
+    ? baseList.filter(p => (p.market || 'CZ') === dashMarket)
+    : baseList
 
   // Category breakdown
   const catMap: Record<string, { count: number; margins: number[] }> = {}
@@ -235,13 +244,34 @@ export default function DashboardPage() {
             </button>
           </div>
 
+          {/* Market filter tabs — only in tabs mode */}
+          {viewMode === 'tabs' && (
+            <div className="flex items-center gap-1 px-5 py-3 border-b border-gray-50">
+              {(['ALL', 'CZ', 'SK'] as const).map(m => (
+                <button key={m} onClick={() => setDashMarket(m)}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium transition ${dashMarket === m ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+                  {m === 'ALL' ? 'Vše' : m === 'CZ' ? '🇨🇿 CZ' : '🇸🇰 SK'}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Column headers */}
-          {!isLoading && displayList.length > 0 && (
+          {!isLoading && displayList.length > 0 && viewMode === 'tabs' && (
             <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 px-5 py-2 border-b border-gray-50 bg-gray-50">
               <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Produkt</span>
               <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-right w-16">Sklad</span>
               <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-right w-24">Naše cena</span>
               <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-right w-24">Konkurence</span>
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-right w-16">Marže</span>
+            </div>
+          )}
+          {!isLoading && displayList.length > 0 && viewMode === 'multi' && (
+            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 px-5 py-2 border-b border-gray-50 bg-gray-50">
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Produkt</span>
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-right w-16">Sklad</span>
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-right w-24">🇨🇿 CZ cena</span>
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-right w-24">🇸🇰 SK cena</span>
               <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-right w-16">Marže</span>
             </div>
           )}
@@ -272,58 +302,112 @@ export default function DashboardPage() {
                 let compDirection: 'cheaper' | 'expensive' | 'same' | null = null
                 if (ourPrice != null && compPrice != null) {
                   compDiff = ((ourPrice - compPrice) / compPrice) * 100
-                  if (compDiff > 1) compDirection = 'expensive'     // my jsme dražší
-                  else if (compDiff < -1) compDirection = 'cheaper' // my jsme levnější
+                  if (compDiff > 1) compDirection = 'expensive'
+                  else if (compDiff < -1) compDirection = 'cheaper'
                   else compDirection = 'same'
                 }
 
-                return (
-                  <div key={p.id} onClick={() => navigate(`/products/${p.id}`)}
-                    className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 items-center px-5 py-3 hover:bg-gray-50 cursor-pointer transition">
+                // Per-market prices for multi mode
+                const czData = p.prices_by_market?.['CZ']
+                const skData = p.prices_by_market?.['SK']
 
-                    {/* Produkt */}
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      {p.thumbnail_url ? (
-                        <img src={p.thumbnail_url} alt="" className="w-8 h-8 object-contain rounded bg-gray-50 border flex-shrink-0"
-                          onError={(e) => { e.currentTarget.style.display = 'none' }} />
-                      ) : (
-                        <div className="w-8 h-8 bg-blue-50 rounded border flex items-center justify-center flex-shrink-0">
-                          <Package size={13} className="text-blue-300" />
-                        </div>
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-800 truncate">{p.name}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          {p.market === 'SK' && <span className="text-xs text-gray-400">🇸🇰</span>}
-                          {p.market === 'CZ' && <span className="text-xs text-gray-400">🇨🇿</span>}
-                          <span className="text-xs text-gray-400 truncate">
-                            {p.category?.split('|').pop()?.trim() || p.sku}
-                          </span>
-                          {/* Hero score mini bar */}
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            <div className="w-8 h-1 bg-gray-100 rounded-full overflow-hidden">
-                              <div className={`h-full rounded-full ${scoreColor}`} style={{ width: `${score}%` }} />
-                            </div>
-                            <span className="text-xs text-gray-400">{score}</span>
+                // Product cell (shared between modes)
+                const productCell = (
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {p.thumbnail_url ? (
+                      <img src={p.thumbnail_url} alt="" className="w-8 h-8 object-contain rounded bg-gray-50 border flex-shrink-0"
+                        onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                    ) : (
+                      <div className="w-8 h-8 bg-blue-50 rounded border flex items-center justify-center flex-shrink-0">
+                        <Package size={13} className="text-blue-300" />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{p.name}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        {p.market === 'SK' && <span className="text-xs text-gray-400">🇸🇰</span>}
+                        {p.market === 'CZ' && <span className="text-xs text-gray-400">🇨🇿</span>}
+                        <span className="text-xs text-gray-400 truncate">
+                          {p.category?.split('|').pop()?.trim() || p.sku}
+                        </span>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <div className="w-8 h-1 bg-gray-100 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${scoreColor}`} style={{ width: `${score}%` }} />
                           </div>
+                          <span className="text-xs text-gray-400">{score}</span>
                         </div>
                       </div>
                     </div>
+                  </div>
+                )
 
-                    {/* Sklad */}
-                    <div className="text-right w-16">
-                      {stock != null ? (
-                        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
-                          stock <= 0 ? 'bg-red-100 text-red-700'
-                          : stock <= 5 ? 'bg-orange-100 text-orange-700'
-                          : 'bg-green-100 text-green-700'
-                        }`}>
-                          {stock} ks
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-300">—</span>
-                      )}
+                // Stock cell (shared)
+                const stockCell = (
+                  <div className="text-right w-16">
+                    {stock != null ? (
+                      <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
+                        stock <= 0 ? 'bg-red-100 text-red-700'
+                        : stock <= 5 ? 'bg-orange-100 text-orange-700'
+                        : 'bg-green-100 text-green-700'
+                      }`}>
+                        {stock} ks
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-300">—</span>
+                    )}
+                  </div>
+                )
+
+                // Margin cell (shared)
+                const marginCell = (
+                  <div className="text-right w-16">
+                    {p.margin != null ? (
+                      <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
+                        Number(p.margin) >= 20 ? 'bg-green-100 text-green-700'
+                        : Number(p.margin) >= 10 ? 'bg-yellow-100 text-yellow-700'
+                        : 'bg-red-100 text-red-700'
+                      }`}>
+                        {Number(p.margin).toFixed(1)} %
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-300">—</span>
+                    )}
+                  </div>
+                )
+
+                if (viewMode === 'multi') {
+                  return (
+                    <div key={p.id} onClick={() => navigate(`/products/${p.id}`)}
+                      className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 items-center px-5 py-3 hover:bg-gray-50 cursor-pointer transition">
+                      {productCell}
+                      {stockCell}
+                      {/* CZ price */}
+                      <div className="text-right w-24">
+                        {czData ? (
+                          <span className="text-sm font-semibold text-gray-800">
+                            {czData.price != null ? `${czData.price.toLocaleString('cs-CZ', { maximumFractionDigits: 0 })} Kč` : '—'}
+                          </span>
+                        ) : <span className="text-xs text-gray-300">—</span>}
+                      </div>
+                      {/* SK price */}
+                      <div className="text-right w-24">
+                        {skData ? (
+                          <span className="text-sm font-semibold text-blue-700">
+                            {skData.price != null ? `${skData.price.toLocaleString('sk-SK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : '—'}
+                          </span>
+                        ) : <span className="text-xs text-gray-300">—</span>}
+                      </div>
+                      {marginCell}
                     </div>
+                  )
+                }
+
+                // tabs mode (existing layout)
+                return (
+                  <div key={p.id} onClick={() => navigate(`/products/${p.id}`)}
+                    className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 items-center px-5 py-3 hover:bg-gray-50 cursor-pointer transition">
+                    {productCell}
+                    {stockCell}
 
                     {/* Naše cena */}
                     <div className="text-right w-24">
@@ -368,20 +452,7 @@ export default function DashboardPage() {
                       )}
                     </div>
 
-                    {/* Marže */}
-                    <div className="text-right w-16">
-                      {p.margin != null ? (
-                        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
-                          Number(p.margin) >= 20 ? 'bg-green-100 text-green-700'
-                          : Number(p.margin) >= 10 ? 'bg-yellow-100 text-yellow-700'
-                          : 'bg-red-100 text-red-700'
-                        }`}>
-                          {Number(p.margin).toFixed(1)} %
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-300">—</span>
-                      )}
-                    </div>
+                    {marginCell}
                   </div>
                 )
               })}

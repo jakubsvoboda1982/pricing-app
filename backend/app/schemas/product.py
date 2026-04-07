@@ -98,6 +98,8 @@ class ProductResponse(BaseModel):
     # Názvy produktu z XML feedů v jiných trzích: {"SK": "Kešu ořechy 1kg SK", "HU": "..."}
     market_names: Optional[Dict[str, Any]] = None
     stock_divisor: Optional[int] = 1
+    prices_by_market: Optional[Dict[str, Any]] = None  # {CZ: {price, currency}, SK: {price, currency}}
+    manufacturing_cost_with_vat: Optional[Decimal] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
