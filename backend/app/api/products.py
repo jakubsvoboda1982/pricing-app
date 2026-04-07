@@ -286,16 +286,9 @@ def list_products(
     Batch-optimized list: fetches prices, competitor prices and catalog data
     in 4 queries total instead of 3×N (N+1 fix).
     """
-    from app.models import CompetitorProductPrice, User
+    from app.models import CompetitorProductPrice
 
-    # Authenticate user and get their company
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    # Filter products by company
-    products = db.query(Product).filter(Product.company_id == user.company_id).all()
+    products = db.query(Product).all()
     if not products:
         return []
 
@@ -501,20 +494,7 @@ def get_product(
     token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
-    from app.models import User
-    from sqlalchemy import and_
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    product = db.query(Product).filter(
-        and_(
-            Product.id == product_id,
-            Product.company_id == user.company_id
-        )
-    ).first()
+    product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     return ProductResponse(**_enrich_with_price(product, db))
@@ -527,20 +507,7 @@ def update_product(
     token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
-    from app.models import User
-    from sqlalchemy import and_
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    product = db.query(Product).filter(
-        and_(
-            Product.id == product_id,
-            Product.company_id == user.company_id
-        )
-    ).first()
+    product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
@@ -560,20 +527,7 @@ def update_stock_divisor(
     db: Session = Depends(get_db),
 ):
     """Nastav koeficient pro přepočet skladovosti (stock_divisor)."""
-    from app.models import User
-    from sqlalchemy import and_
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    product = db.query(Product).filter(
-        and_(
-            Product.id == product_id,
-            Product.company_id == user.company_id
-        )
-    ).first()
+    product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
     if divisor < 1:
@@ -793,20 +747,7 @@ def delete_product(
     db: Session = Depends(get_db)
 ):
     """Odebere produkt ze sledování - katalogový záznam zůstane zachován"""
-    from app.models import User
-    from sqlalchemy import and_
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    product = db.query(Product).filter(
-        and_(
-            Product.id == product_id,
-            Product.company_id == user.company_id
-        )
-    ).first()
+    product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
@@ -823,21 +764,7 @@ def get_product_prices(
     token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
-    from app.models import User
-    from sqlalchemy import and_
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    # Verify product belongs to user's company
-    product = db.query(Product).filter(
-        and_(
-            Product.id == product_id,
-            Product.company_id == user.company_id
-        )
-    ).first()
+    product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
@@ -855,20 +782,7 @@ def set_product_price(
     db: Session = Depends(get_db)
 ):
     """Nastav cenu produktu ručně"""
-    from app.models import User
-    from sqlalchemy import and_
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    product = db.query(Product).filter(
-        and_(
-            Product.id == product_id,
-            Product.company_id == user.company_id
-        )
-    ).first()
+    product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
@@ -892,21 +806,10 @@ async def add_competitor_url(
     token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
-    from app.models import CompetitorProductPrice, CompetitorPriceHistory, User
+    from app.models import CompetitorProductPrice, CompetitorPriceHistory
     from app.competitor_scraper import scrape_competitor_price
-    from sqlalchemy import and_
 
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    product = db.query(Product).filter(
-        and_(
-            Product.id == product_id,
-            Product.company_id == user.company_id
-        )
-    ).first()
+    product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
@@ -965,20 +868,7 @@ def remove_competitor_url(
     token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
-    from app.models import User
-    from sqlalchemy import and_
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    product = db.query(Product).filter(
-        and_(
-            Product.id == product_id,
-            Product.company_id == user.company_id
-        )
-    ).first()
+    product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 

@@ -30,20 +30,8 @@ def get_competitors(
 ):
     """Načti seznam konkurentů s filtry"""
     from sqlalchemy import func, and_
-    from app.models import User
 
-    # Ověř uživatele a filtruj podle jeho společnosti
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    query = db.query(Competitor).filter(
-        and_(
-            Competitor.is_active == is_active,
-            Competitor.company_id == user.company_id
-        )
-    )
+    query = db.query(Competitor).filter(Competitor.is_active == is_active)
 
     if category:
         query = query.filter(Competitor.category == category)
@@ -228,20 +216,7 @@ def get_competitor_detail(
     db: Session = Depends(get_db)
 ):
     """Načti detaily konkurenta včetně cen, rankingu a upozornění"""
-    from app.models import User
-
-    # Ověř, že konkurent patří k příslušné společnosti
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    competitor = db.query(Competitor).filter(
-        and_(
-            Competitor.id == competitor_id,
-            Competitor.company_id == user.company_id
-        )
-    ).first()
+    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
@@ -289,19 +264,7 @@ def update_competitor(
     db: Session = Depends(get_db)
 ):
     """Aktualizuj informace o konkurentovi (manuální editace)"""
-    from app.models import User
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    competitor = db.query(Competitor).filter(
-        and_(
-            Competitor.id == competitor_id,
-            Competitor.company_id == user.company_id
-        )
-    ).first()
+    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
@@ -324,19 +287,7 @@ def delete_competitor(
     db: Session = Depends(get_db)
 ):
     """Smaž konkurenta (soft delete - is_active = False)"""
-    from app.models import User
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    competitor = db.query(Competitor).filter(
-        and_(
-            Competitor.id == competitor_id,
-            Competitor.company_id == user.company_id
-        )
-    ).first()
+    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
@@ -355,19 +306,8 @@ async def rescrape_competitor(
 ):
     """Znovu stáhni metadata konkurenta z URL (max 8s timeout)"""
     import asyncio
-    from app.models import User
 
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    competitor = db.query(Competitor).filter(
-        and_(
-            Competitor.id == competitor_id,
-            Competitor.company_id == user.company_id
-        )
-    ).first()
+    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
@@ -422,19 +362,7 @@ def get_competitor_prices(
     db: Session = Depends(get_db)
 ):
     """Načti historii cen konkurenta"""
-    from app.models import User
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    competitor = db.query(Competitor).filter(
-        and_(
-            Competitor.id == competitor_id,
-            Competitor.company_id == user.company_id
-        )
-    ).first()
+    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
@@ -465,22 +393,7 @@ def get_alerts(
     db: Session = Depends(get_db)
 ):
     """Načti upozornění konkurentů"""
-    from app.models import User
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    # Filtruj pouze upozornění z konkurentů dané společnosti
-    query = db.query(CompetitorAlert).join(
-        Competitor, CompetitorAlert.competitor_id == Competitor.id
-    ).filter(
-        and_(
-            Competitor.company_id == user.company_id,
-            CompetitorAlert.is_read == is_read
-        )
-    )
+    query = db.query(CompetitorAlert).filter(CompetitorAlert.is_read == is_read)
 
     if competitor_id:
         query = query.filter(CompetitorAlert.competitor_id == competitor_id)
@@ -497,21 +410,7 @@ def dismiss_alert(
     db: Session = Depends(get_db)
 ):
     """Označ upozornění jako přečtené"""
-    from app.models import User
-
-    user_id = token_payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Neautorizováno")
-
-    alert = db.query(CompetitorAlert).join(
-        Competitor, CompetitorAlert.competitor_id == Competitor.id
-    ).filter(
-        and_(
-            CompetitorAlert.id == alert_id,
-            Competitor.company_id == user.company_id
-        )
-    ).first()
+    alert = db.query(CompetitorAlert).filter(CompetitorAlert.id == alert_id).first()
     if not alert:
         raise HTTPException(status_code=404, detail="Upozornění nenalezeno")
 
