@@ -27,6 +27,8 @@ def get_competitors(
     limit: int = 50
 ):
     """Načti seznam konkurentů s filtry"""
+    from sqlalchemy import func, and_
+
     query = db.query(Competitor).filter(Competitor.is_active == is_active)
 
     if category:
@@ -37,24 +39,54 @@ def get_competitors(
 
     competitors = query.offset(skip).limit(limit).all()
 
-    # Obohať o poslední cenu a rank
+    # Efektivnější dotazy - vytvoř mapy pro snadný lookup
+    if not competitors:
+        return []
+
+    competitor_ids = [c.id for c in competitors]
+
+    # Dotaz na nejnovější ceny
+    latest_prices_subq = (
+        db.query(
+            CompetitorPrice.competitor_id,
+            CompetitorPrice.price
+        ).filter(
+            CompetitorPrice.competitor_id.in_(competitor_ids)
+        ).distinct(CompetitorPrice.competitor_id)
+        .order_by(CompetitorPrice.competitor_id, desc(CompetitorPrice.recorded_at))
+    ).all()
+
+    prices_map = {p[0]: p[1] for p in latest_prices_subq}
+
+    # Dotaz na nejnovější ranking
+    latest_ranks_subq = (
+        db.query(
+            CompetitorRank.competitor_id,
+            CompetitorRank.rank
+        ).filter(
+            CompetitorRank.competitor_id.in_(competitor_ids)
+        ).distinct(CompetitorRank.competitor_id)
+        .order_by(CompetitorRank.competitor_id, desc(CompetitorRank.evaluated_at))
+    ).all()
+
+    ranks_map = {r[0]: r[1] for r in latest_ranks_subq}
+
+    # Počet nepřečtených alertů
+    alerts_subq = db.query(
+        CompetitorAlert.competitor_id,
+        func.count(CompetitorAlert.id).label('alert_count')
+    ).filter(
+        and_(
+            CompetitorAlert.competitor_id.in_(competitor_ids),
+            CompetitorAlert.is_read == False
+        )
+    ).group_by(CompetitorAlert.competitor_id).all()
+
+    alerts_map = {a[0]: a[1] for a in alerts_subq}
+
+    # Vytvořit výsledky
     result = []
     for comp in competitors:
-        latest_price = db.query(CompetitorPrice).filter(
-            CompetitorPrice.competitor_id == comp.id
-        ).order_by(desc(CompetitorPrice.recorded_at)).first()
-
-        latest_rank = db.query(CompetitorRank).filter(
-            CompetitorRank.competitor_id == comp.id
-        ).order_by(desc(CompetitorRank.evaluated_at)).first()
-
-        alerts_count = db.query(CompetitorAlert).filter(
-            and_(
-                CompetitorAlert.competitor_id == comp.id,
-                CompetitorAlert.is_read == False
-            )
-        ).count()
-
         result.append(CompetitorListResponse(
             id=comp.id,
             name=comp.name,
@@ -65,9 +97,9 @@ def get_competitors(
             is_active=comp.is_active,
             last_scrape_date=comp.last_scrape_date,
             scrape_error=comp.scrape_error,
-            latest_price=latest_price.price if latest_price else None,
-            latest_rank=latest_rank.rank if latest_rank else None,
-            unread_alerts_count=alerts_count
+            latest_price=prices_map.get(comp.id),
+            latest_rank=ranks_map.get(comp.id),
+            unread_alerts_count=alerts_map.get(comp.id, 0)
         ))
 
     return result
@@ -76,15 +108,26 @@ def get_competitors(
 @router.post("", response_model=CompetitorResponse, status_code=status.HTTP_201_CREATED)
 def add_competitor(
     competitor_data: CompetitorCreate,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """Přidej nového konkurenta - okamžitě bez čekání na scraping"""
+    from app.models import User
 
-    company = db.query(Company).first()
+    # Získej aktuálního uživatele a jeho společnost
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Uživatel nenalezen"
+        )
+
+    company = db.query(Company).filter(Company.id == user.company_id).first()
     if not company:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Žádná společnost v systému"
+            detail="Společnost nenalezena"
         )
 
     # Ověř unikátnost URL+market+company
@@ -166,12 +209,25 @@ def add_competitor(
 @router.get("/{competitor_id}", response_model=CompetitorDetailResponse)
 def get_competitor_detail(
     competitor_id: str,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
     days_back: int = 30
 ):
     """Načti detaily konkurenta včetně cen, rankingu a upozornění"""
+    from app.models import User
 
-    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+    # Ověř, že konkurent patří k příslušné společnosti
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    competitor = db.query(Competitor).filter(
+        and_(
+            Competitor.id == competitor_id,
+            Competitor.company_id == user.company_id
+        )
+    ).first()
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
@@ -215,11 +271,23 @@ def get_competitor_detail(
 def update_competitor(
     competitor_id: str,
     competitor_data: CompetitorUpdate,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """Aktualizuj informace o konkurentovi (manuální editace)"""
+    from app.models import User
 
-    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    competitor = db.query(Competitor).filter(
+        and_(
+            Competitor.id == competitor_id,
+            Competitor.company_id == user.company_id
+        )
+    ).first()
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
@@ -238,11 +306,23 @@ def update_competitor(
 @router.delete("/{competitor_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_competitor(
     competitor_id: str,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """Smaž konkurenta (soft delete - is_active = False)"""
+    from app.models import User
 
-    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    competitor = db.query(Competitor).filter(
+        and_(
+            Competitor.id == competitor_id,
+            Competitor.company_id == user.company_id
+        )
+    ).first()
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
@@ -256,12 +336,24 @@ def delete_competitor(
 @router.post("/{competitor_id}/rescrape", response_model=CompetitorResponse)
 async def rescrape_competitor(
     competitor_id: str,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """Znovu stáhni metadata konkurenta z URL (max 8s timeout)"""
     import asyncio
+    from app.models import User
 
-    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    competitor = db.query(Competitor).filter(
+        and_(
+            Competitor.id == competitor_id,
+            Competitor.company_id == user.company_id
+        )
+    ).first()
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
@@ -310,13 +402,25 @@ async def rescrape_competitor(
 @router.get("/{competitor_id}/prices", response_model=list[CompetitorPriceResponse])
 def get_competitor_prices(
     competitor_id: str,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
     days_back: int = 30,
     market: str = None
 ):
     """Načti historii cen konkurenta"""
+    from app.models import User
 
-    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    competitor = db.query(Competitor).filter(
+        and_(
+            Competitor.id == competitor_id,
+            Competitor.company_id == user.company_id
+        )
+    ).first()
     if not competitor:
         raise HTTPException(status_code=404, detail="Konkurent nenalezen")
 
@@ -339,6 +443,7 @@ def get_competitor_prices(
 
 @router.get("/alerts", response_model=list[CompetitorAlertResponse])
 def get_alerts(
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
     competitor_id: str = None,
     is_read: bool = False,
@@ -346,8 +451,22 @@ def get_alerts(
     limit: int = 50
 ):
     """Načti upozornění konkurentů"""
+    from app.models import User
 
-    query = db.query(CompetitorAlert).filter(CompetitorAlert.is_read == is_read)
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    # Filtruj pouze upozornění z konkurentů dané společnosti
+    query = db.query(CompetitorAlert).join(
+        Competitor, CompetitorAlert.competitor_id == Competitor.id
+    ).filter(
+        and_(
+            Competitor.company_id == user.company_id,
+            CompetitorAlert.is_read == is_read
+        )
+    )
 
     if competitor_id:
         query = query.filter(CompetitorAlert.competitor_id == competitor_id)
@@ -360,11 +479,25 @@ def get_alerts(
 @router.put("/alerts/{alert_id}/dismiss", status_code=status.HTTP_204_NO_CONTENT)
 def dismiss_alert(
     alert_id: str,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """Označ upozornění jako přečtené"""
+    from app.models import User
 
-    alert = db.query(CompetitorAlert).filter(CompetitorAlert.id == alert_id).first()
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Neautorizováno")
+
+    alert = db.query(CompetitorAlert).join(
+        Competitor, CompetitorAlert.competitor_id == Competitor.id
+    ).filter(
+        and_(
+            CompetitorAlert.id == alert_id,
+            Competitor.company_id == user.company_id
+        )
+    ).first()
     if not alert:
         raise HTTPException(status_code=404, detail="Upozornění nenalezeno")
 
