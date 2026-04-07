@@ -174,19 +174,18 @@ export default function Layout() {
               )}
             </div>
 
-            <div className="flex items-center space-x-6">
-              <select className="text-gray-700 font-medium bg-transparent hover:bg-gray-50 px-3 py-1 rounded cursor-pointer">
-                <option>CZ</option>
-                <option>SK</option>
-                <option>EN</option>
-              </select>
-
+            <div className="flex items-center gap-3">
               <div className="relative">
                 <button
                   onClick={() => setUserMenuOpen(v => !v)}
-                  className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold cursor-pointer hover:bg-blue-700 transition select-none"
+                  className="flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-300 px-2.5 py-1.5 rounded-lg transition cursor-pointer"
                 >
-                  {(user?.email?.[0] ?? 'U').toUpperCase()}
+                  <div className="w-7 h-7 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                    {(user?.email?.[0] ?? 'U').toUpperCase()}
+                  </div>
+                  <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${viewMode === 'multi' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                    {viewMode === 'multi' ? 'Multi-trh' : 'Market tabs'}
+                  </span>
                 </button>
 
                 {userMenuOpen && (
