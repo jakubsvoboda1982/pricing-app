@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
 from app.database import get_db
@@ -401,6 +401,60 @@ def get_alerts(
     alerts = query.order_by(desc(CompetitorAlert.created_at)).offset(skip).limit(limit).all()
 
     return [CompetitorAlertResponse.model_validate(a) for a in alerts]
+
+
+@router.post("/{competitor_id}/match-all-products")
+async def match_all_products(
+    competitor_id: str,
+    background_tasks: BackgroundTasks,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Spustí matching pipeline na pozadí pro tohoto konkurenta vs. všechny
+    sledované produkty firmy. Výsledky (návrhy shod) se zobrazí v Párovacím centru.
+    """
+    from app.models import User
+    from app.models.product import Product
+
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Uživatel nenalezen")
+
+    competitor = db.query(Competitor).filter(
+        and_(Competitor.id == competitor_id, Competitor.company_id == user.company_id)
+    ).first()
+    if not competitor:
+        raise HTTPException(status_code=404, detail="Konkurent nenalezen")
+
+    product_count = db.query(Product).filter_by(company_id=user.company_id).count()
+    company_id_str = str(user.company_id)
+
+    async def _run():
+        from app.database import SessionLocal
+        from app.scraping.pipeline import run_pipeline_for_competitor
+        bg_db = SessionLocal()
+        try:
+            await run_pipeline_for_competitor(
+                competitor_id=competitor_id,
+                company_id=company_id_str,
+                db=bg_db,
+            )
+        except Exception as e:
+            logger.error(f"[competitors] bulk match error competitor={competitor_id}: {e}")
+        finally:
+            bg_db.close()
+
+    background_tasks.add_task(_run)
+
+    return {
+        "message": "Pipeline spuštěn na pozadí",
+        "competitor_id": competitor_id,
+        "competitor_name": competitor.name,
+        "market": competitor.market,
+        "product_count": product_count,
+    }
 
 
 @router.put("/alerts/{alert_id}/dismiss", status_code=status.HTTP_204_NO_CONTENT)
