@@ -10,49 +10,80 @@ import io
 import csv
 from datetime import datetime
 from typing import Optional
-from collections import defaultdict
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
-# Všechna exportovatelná pole
 ALL_FIELDS = ['id', 'sku', 'name', 'category', 'description', 'current_price', 'old_price', 'created_at', 'updated_at']
 
 FIELD_LABELS = {
-    'id': 'Product ID',
-    'sku': 'SKU',
-    'name': 'Název',
-    'category': 'Kategorie',
-    'description': 'Popis',
+    'id':            'Product ID',
+    'sku':           'SKU',
+    'name':          'Název',
+    'category':      'Kategorie',
+    'description':   'Popis',
     'current_price': 'Aktuální cena',
-    'old_price': 'Stará cena',
-    'created_at': 'Vytvořeno',
-    'updated_at': 'Upraveno',
+    'old_price':     'Stará cena',
+    'created_at':    'Vytvořeno',
+    'updated_at':    'Upraveno',
 }
 
 
-def _get_product_prices(db: Session, product_ids: list) -> dict:
-    """Načti poslední ceny pro všechny produkty (batch)."""
-    from sqlalchemy import func
-    prices = {}
+def _get_price_map(db: Session, product_ids: list) -> dict:
+    """Načti poslední cenu per produkt (batch) — seřazeno dle changed_at DESC."""
     if not product_ids:
-        return prices
-    # Latest price per product
-    latest = (
+        return {}
+    prices = (
         db.query(Price)
         .filter(Price.product_id.in_(product_ids))
-        .order_by(Price.product_id, Price.created_at.desc())
+        .order_by(Price.product_id, Price.changed_at.desc())
         .all()
     )
-    seen = set()
-    for p in latest:
+    seen: dict = {}
+    for p in prices:
         pid = str(p.product_id)
         if pid not in seen:
-            prices[pid] = p
-            seen.add(pid)
-    return prices
+            seen[pid] = p
+    return seen
 
 
-def _build_row(product, price_record, fields: list) -> list:
+def _get_products(
+    db: Session,
+    category: Optional[str],
+    market: Optional[str],
+    min_price: Optional[float],
+    max_price: Optional[float],
+    search: Optional[str],
+) -> list:
+    """Vrať filtrované produkty."""
+    q = db.query(Product)
+    if category:
+        q = q.filter(Product.category == category)
+    if search:
+        q = q.filter(Product.name.ilike(f"%{search}%"))
+
+    products = q.all()
+
+    # Cenové filtry — načti ceny jednou
+    if min_price is not None or max_price is not None or market:
+        price_map = _get_price_map(db, [p.id for p in products])
+        filtered = []
+        for p in products:
+            pr = price_map.get(str(p.id))
+            if market and pr and pr.market != market:
+                continue
+            if pr and pr.current_price is not None:
+                val = float(pr.current_price)
+                if min_price is not None and val < min_price:
+                    continue
+                if max_price is not None and val > max_price:
+                    continue
+            filtered.append(p)
+        return filtered
+
+    return products
+
+
+def _build_row(product, price_rec, fields: list) -> list:
     row = []
     for f in fields:
         if f == 'id':
@@ -66,108 +97,122 @@ def _build_row(product, price_record, fields: list) -> list:
         elif f == 'description':
             row.append(product.description or '')
         elif f == 'current_price':
-            row.append(float(price_record.current_price) if price_record and price_record.current_price else '')
+            row.append(float(price_rec.current_price) if price_rec and price_rec.current_price else '')
         elif f == 'old_price':
-            row.append(float(price_record.old_price) if price_record and price_record.old_price else '')
+            row.append(float(price_rec.old_price) if price_rec and price_rec.old_price else '')
         elif f == 'created_at':
-            row.append(product.created_at.strftime('%Y-%m-%d %H:%M') if product.created_at else '')
+            row.append(product.created_at.strftime('%Y-%m-%d %H:%M') if getattr(product, 'created_at', None) else '')
         elif f == 'updated_at':
-            row.append(product.updated_at.strftime('%Y-%m-%d %H:%M') if product.updated_at else '')
+            row.append(product.updated_at.strftime('%Y-%m-%d %H:%M') if getattr(product, 'updated_at', None) else '')
         else:
             row.append('')
     return row
 
 
+# ── Sdílené query params ──────────────────────────────────────────────────────
+
+def _parse_params(
+    fields: Optional[str],
+    category: Optional[str],
+    market: Optional[str],
+    min_price: Optional[float],
+    max_price: Optional[float],
+    search: Optional[str],
+    db: Session,
+):
+    selected = [f for f in (fields.split(',') if fields else ALL_FIELDS) if f in ALL_FIELDS] or ALL_FIELDS
+    products = _get_products(db, category, market, min_price, max_price, search)
+    price_map = _get_price_map(db, [p.id for p in products])
+    return selected, products, price_map
+
+
+# ── XLSX ─────────────────────────────────────────────────────────────────────
+
 @router.get("/products/xlsx")
 def export_products_xlsx(
-    fields: Optional[str] = Query(None, description="Comma-separated field names"),
+    fields:    Optional[str]   = Query(None),
+    category:  Optional[str]   = Query(None),
+    market:    Optional[str]   = Query(None),
+    min_price: Optional[float] = Query(None),
+    max_price: Optional[float] = Query(None),
+    search:    Optional[str]   = Query(None),
     token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    """Export produktů do XLSX — podporuje výběr sloupců."""
-    # Zparsuj vybraná pole
-    selected = [f for f in (fields.split(',') if fields else ALL_FIELDS) if f in ALL_FIELDS]
-    if not selected:
-        selected = ALL_FIELDS
+    selected, products, price_map = _parse_params(fields, category, market, min_price, max_price, search, db)
 
-    products = db.query(Product).all()
-    price_map = _get_product_prices(db, [p.id for p in products])
-
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    sheet.title = "Produkty"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Produkty"
 
     # Záhlaví
-    headers = [FIELD_LABELS.get(f, f) for f in selected]
-    sheet.append(headers)
-
-    # Styly záhlaví
+    ws.append([FIELD_LABELS.get(f, f) for f in selected])
     header_fill = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=10)
-    for cell in sheet[1]:
+    for cell in ws[1]:
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
     # Data
     for product in products:
-        price_rec = price_map.get(str(product.id))
-        row = _build_row(product, price_rec, selected)
-        sheet.append(row)
+        ws.append(_build_row(product, price_map.get(str(product.id)), selected))
 
     # Šířky sloupců
-    for col_idx, field in enumerate(selected, start=1):
-        col_letter = openpyxl.utils.get_column_letter(col_idx)
-        if field == 'id':
-            sheet.column_dimensions[col_letter].width = 38
-        elif field in ('name', 'description'):
-            sheet.column_dimensions[col_letter].width = 30
-        else:
-            sheet.column_dimensions[col_letter].width = 18
+    widths = {'id': 38, 'name': 30, 'description': 30}
+    for i, f in enumerate(selected, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = widths.get(f, 18)
 
-    # Uložit do paměti
-    output = io.BytesIO()
-    workbook.save(output)
-    output.seek(0)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
 
-    filename = f"products-{datetime.now().strftime('%Y-%m-%d')}.xlsx"
     return StreamingResponse(
-        output,
+        buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="products-{datetime.now().strftime("%Y-%m-%d")}.xlsx"'},
     )
 
+
+# ── CSV ──────────────────────────────────────────────────────────────────────
 
 @router.get("/products/csv")
 def export_products_csv(
-    fields: Optional[str] = Query(None, description="Comma-separated field names"),
+    fields:    Optional[str]   = Query(None),
+    category:  Optional[str]   = Query(None),
+    market:    Optional[str]   = Query(None),
+    min_price: Optional[float] = Query(None),
+    max_price: Optional[float] = Query(None),
+    search:    Optional[str]   = Query(None),
     token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    """Export produktů do CSV — podporuje výběr sloupců."""
-    selected = [f for f in (fields.split(',') if fields else ALL_FIELDS) if f in ALL_FIELDS]
-    if not selected:
-        selected = ALL_FIELDS
+    selected, products, price_map = _parse_params(fields, category, market, min_price, max_price, search, db)
 
-    products = db.query(Product).all()
-    price_map = _get_product_prices(db, [p.id for p in products])
-
-    output = io.StringIO()
-    writer = csv.writer(output, quoting=csv.QUOTE_ALL)
-
-    # Záhlaví
-    writer.writerow([FIELD_LABELS.get(f, f) for f in selected])
-
-    # Data
+    buf = io.StringIO()
+    w = csv.writer(buf, quoting=csv.QUOTE_ALL)
+    w.writerow([FIELD_LABELS.get(f, f) for f in selected])
     for product in products:
-        price_rec = price_map.get(str(product.id))
-        row = _build_row(product, price_rec, selected)
-        writer.writerow(row)
+        w.writerow(_build_row(product, price_map.get(str(product.id)), selected))
 
-    content = output.getvalue().encode('utf-8-sig')  # BOM pro Excel UTF-8
-    filename = f"products-{datetime.now().strftime('%Y-%m-%d')}.csv"
+    content = buf.getvalue().encode('utf-8-sig')  # BOM pro Excel
     return StreamingResponse(
         io.BytesIO(content),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="products-{datetime.now().strftime("%Y-%m-%d")}.csv"'},
     )
+
+
+# ── Meta: dostupné kategorie pro filtr UI ────────────────────────────────────
+
+@router.get("/products/meta")
+def export_meta(
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Vrátí seznam kategorií a trhů pro filter UI."""
+    from sqlalchemy import distinct
+    cats = [r[0] for r in db.query(distinct(Product.category)).filter(Product.category.isnot(None)).all()]
+    markets = [r[0] for r in db.query(distinct(Price.market)).all()]
+    total = db.query(Product).count()
+    return {"categories": sorted(cats), "markets": sorted(markets), "total": total}
