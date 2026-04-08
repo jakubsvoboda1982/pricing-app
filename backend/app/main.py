@@ -198,7 +198,8 @@ app = FastAPI(
     title="Pricing Management Software",
     description="API for pricing product management",
     version="0.1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    redirect_slashes=False,  # Zabrání 301 redirect při CORS (trailing slash problem)
 )
 
 settings = get_settings()

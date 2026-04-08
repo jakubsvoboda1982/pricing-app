@@ -21,7 +21,7 @@ class AuditLogResponse(BaseModel):
     class Config:
         from_attributes = True
 
-@router.get("/", response_model=list[AuditLogResponse])
+@router.get("", response_model=list[AuditLogResponse])
 def get_audit_logs(db: Session = Depends(get_db)):
     logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).all()
     return logs

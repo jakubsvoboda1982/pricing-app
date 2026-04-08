@@ -21,7 +21,7 @@ class OpportunityResponse(BaseModel):
     class Config:
         from_attributes = True
 
-@router.get("/", response_model=list[OpportunityResponse])
+@router.get("", response_model=list[OpportunityResponse])
 def list_opportunities(db: Session = Depends(get_db)):
     """Get list of product opportunities based on analytics"""
     products = db.query(Product).limit(8).all()

@@ -46,7 +46,7 @@ class PendingUserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-@router.get("/", response_model=list[UserResponse])
+@router.get("", response_model=list[UserResponse])
 def list_users(
     token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
@@ -55,7 +55,7 @@ def list_users(
     return users
 
 
-@router.post("/", response_model=UserResponse)
+@router.post("", response_model=UserResponse)
 def create_user(user: UserCreate, token_payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
     """Create a new user with temporary password"""
     existing = db.query(User).filter(User.email == user.email).first()

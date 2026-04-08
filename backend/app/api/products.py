@@ -280,7 +280,7 @@ def _enrich_with_price(
     }
 
 
-@router.get("/", response_model=list[ProductResponse])
+@router.get("", response_model=list[ProductResponse])
 def list_products(
     token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
@@ -369,7 +369,7 @@ def list_products(
     ]
 
 
-@router.post("/", response_model=ProductResponse)
+@router.post("", response_model=ProductResponse)
 def create_product(
     product: ProductCreate,
     token_payload: dict = Depends(verify_token),
