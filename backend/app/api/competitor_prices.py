@@ -8,7 +8,7 @@ from sqlalchemy import desc
 from app.database import get_db
 from app.models import Product, CompetitorProductPrice, CompetitorPriceHistory
 from app.schemas.product import CompetitorProductPriceResponse, ProductResponse
-from app.competitor_scraper import scrape_competitor_price, update_all_competitor_prices
+from app.competitor_scraper import scrape_competitor_price, update_all_competitor_prices, _currency_from_url, _market_from_url
 from app.middleware.auth import verify_token
 from pydantic import BaseModel
 from uuid import UUID
@@ -17,6 +17,9 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import asyncio
 import logging
+
+# Mapování trh → měna
+_MARKET_TO_CURRENCY = {'CZ': 'CZK', 'SK': 'EUR', 'HU': 'HUF'}
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,21 @@ def get_competitor_prices(
     prices = db.query(CompetitorProductPrice).filter(
         CompetitorProductPrice.product_id == product_id
     ).all()
+
+    # Auto-oprava měny z TLD domény — opraví staré záznamy s nesprávnou měnou
+    needs_commit = False
+    for p in prices:
+        correct_currency = _currency_from_url(p.competitor_url)
+        correct_market = _market_from_url(p.competitor_url)
+        if p.currency != correct_currency or p.market != correct_market:
+            p.currency = correct_currency
+            p.market = correct_market
+            needs_commit = True
+    if needs_commit:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
 
     return prices
 
@@ -70,12 +88,12 @@ def add_competitor_url_tracking(
     if existing:
         raise HTTPException(status_code=400, detail="Tato URL je již sledována")
 
-    # Create new tracking record
+    # Create new tracking record — odvoz měnu a trh z TLD domény URL
     comp_price = CompetitorProductPrice(
         product_id=product_id,
         competitor_url=url,
-        currency="CZK",
-        market="CZ",
+        currency=_currency_from_url(url),
+        market=_market_from_url(url),
         fetch_status="pending",
         next_update_at=datetime.utcnow()  # Schedule for immediate update
     )
@@ -143,12 +161,11 @@ async def refresh_competitor_prices(
                 CompetitorProductPrice.competitor_url == url,
             ).first()
             if not existing:
-                market = url_item.get('market', 'CZ') if isinstance(url_item, dict) else 'CZ'
                 db.add(CompetitorProductPrice(
                     product_id=product_id,
                     competitor_url=url,
-                    currency="CZK" if market == "CZ" else "EUR",
-                    market=market,
+                    currency=_currency_from_url(url),
+                    market=_market_from_url(url),
                     fetch_status="pending",
                 ))
         db.commit()
@@ -186,8 +203,10 @@ async def refresh_competitor_prices(
                     )
                     db.add(history)
 
-                # Update current price
+                # Update current price + oprav měnu/trh z domény
                 comp_price.price = price
+                comp_price.currency = _currency_from_url(comp_price.competitor_url)
+                comp_price.market = _market_from_url(comp_price.competitor_url)
                 comp_price.last_fetched_at = datetime.utcnow()
                 comp_price.fetch_status = 'success'
                 comp_price.fetch_error = None
@@ -334,8 +353,8 @@ async def refresh_single_url(
         comp_price = CompetitorProductPrice(
             product_id=product_id,
             competitor_url=url,
-            currency="CZK" if market == "CZ" else "EUR",
-            market=market,
+            currency=_currency_from_url(url),
+            market=_market_from_url(url),
             fetch_status="pending",
         )
         db.add(comp_price)
@@ -348,6 +367,8 @@ async def refresh_single_url(
             if comp_price.price is not None:
                 db.add(CompetitorPriceHistory(competitor_price_id=comp_price.id, price=comp_price.price))
             comp_price.price = price
+            comp_price.currency = _currency_from_url(comp_price.competitor_url)
+            comp_price.market = _market_from_url(comp_price.competitor_url)
             comp_price.last_fetched_at = datetime.utcnow()
             comp_price.fetch_status = "success"
             comp_price.fetch_error = None
