@@ -56,6 +56,7 @@ class UserCreateRequest(BaseModel):
 class UserUpdateRequest(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    full_name: Optional[str] = None
 
 
 class UserAdminResponse(BaseModel):
@@ -64,6 +65,8 @@ class UserAdminResponse(BaseModel):
     full_name: str
     role: str
     is_active: bool
+    is_verified: Optional[bool] = True
+    is_approved: Optional[bool] = True
     company_id: str
     created_at: Optional[datetime] = None
 
@@ -144,6 +147,8 @@ def list_users(
             full_name=u.full_name,
             role=u.role or "read_only",
             is_active=u.is_active,
+            is_verified=u.is_verified,
+            is_approved=u.is_approved,
             company_id=str(u.company_id),
             created_at=u.created_at,
         )
@@ -192,6 +197,8 @@ def create_user(
         full_name=user.full_name,
         role=user.role,
         is_active=user.is_active,
+        is_verified=user.is_verified,
+        is_approved=user.is_approved,
         company_id=str(user.company_id),
         created_at=user.created_at,
     )
@@ -220,6 +227,9 @@ def update_user(
     if update_data.is_active is not None:
         user.is_active = update_data.is_active
 
+    if update_data.full_name is not None and update_data.full_name.strip():
+        user.full_name = update_data.full_name.strip()
+
     db.commit()
     db.refresh(user)
 
@@ -229,6 +239,8 @@ def update_user(
         full_name=user.full_name,
         role=user.role,
         is_active=user.is_active,
+        is_verified=user.is_verified,
+        is_approved=user.is_approved,
         company_id=str(user.company_id),
         created_at=user.created_at,
     )

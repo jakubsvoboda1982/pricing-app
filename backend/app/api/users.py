@@ -4,6 +4,7 @@ from app.database import get_db
 from app.models import User
 from app.utils.password import hash_password
 from app.utils.email import send_approval_notification_email
+from app.middleware.auth import verify_token
 from pydantic import BaseModel, EmailStr
 from uuid import UUID
 from datetime import datetime
@@ -46,13 +47,16 @@ class PendingUserResponse(BaseModel):
 
 
 @router.get("/", response_model=list[UserResponse])
-def list_users(db: Session = Depends(get_db)):
+def list_users(
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
     users = db.query(User).filter(User.is_active == True).all()
     return users
 
 
 @router.post("/", response_model=UserResponse)
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
+def create_user(user: UserCreate, token_payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
     """Create a new user with temporary password"""
     existing = db.query(User).filter(User.email == user.email).first()
     if existing:
@@ -82,7 +86,7 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{user_id}", response_model=UserResponse)
-def update_user(user_id: UUID, user_update: UserUpdate, db: Session = Depends(get_db)):
+def update_user(user_id: UUID, user_update: UserUpdate, token_payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -94,7 +98,7 @@ def update_user(user_id: UUID, user_update: UserUpdate, db: Session = Depends(ge
 
 
 @router.delete("/{user_id}")
-def delete_user(user_id: UUID, db: Session = Depends(get_db)):
+def delete_user(user_id: UUID, token_payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -108,7 +112,8 @@ def delete_user(user_id: UUID, db: Session = Depends(get_db)):
 @router.get("/pending", response_model=list[PendingUserResponse])
 def get_pending_users(
     status_filter: str = "all",
-    db: Session = Depends(get_db)
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
 ):
     """Get list of pending users for admin approval"""
     query = db.query(User)
@@ -125,7 +130,7 @@ def get_pending_users(
 
 
 @router.post("/{user_id}/approve")
-async def approve_user(user_id: UUID, db: Session = Depends(get_db)):
+async def approve_user(user_id: UUID, token_payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
     """Admin approval of user account"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -144,7 +149,7 @@ async def approve_user(user_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/{user_id}/reject")
-def reject_user(user_id: UUID, db: Session = Depends(get_db)):
+def reject_user(user_id: UUID, token_payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
     """Admin rejection of user account (soft delete)"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
