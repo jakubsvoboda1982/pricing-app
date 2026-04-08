@@ -18,6 +18,16 @@ const EXCHANGE: Record<string, number> = {
 const MARKET_CURRENCY: Record<string, string> = { CZ: 'CZK', SK: 'EUR', HU: 'HUF' }
 const MARKET_FLAG: Record<string, string>     = { CZ: '🇨🇿', SK: '🇸🇰', HU: '🇭🇺' }
 
+/** Odvoď správnou měnu z TLD domény URL — client-side fallback */
+function currencyFromUrl(url: string): string {
+  try {
+    const host = new URL(url).hostname
+    if (host.endsWith('.sk')) return 'EUR'
+    if (host.endsWith('.hu')) return 'HUF'
+  } catch { /* ignore */ }
+  return 'CZK'
+}
+
 /** Convert amount in CZK → target market currency */
 function toMarket(czk: number, market: string): number {
   const rate = EXCHANGE[MARKET_CURRENCY[market] ?? 'CZK'] ?? 1
@@ -780,7 +790,9 @@ export default function ProductDetailPage() {
     const vals = filteredPrices
       .filter(cp => cp.price != null)
       .map(cp => {
-        const rate = EXCHANGE[cp.currency ?? 'CZK'] ?? 1
+        // Vždy odvoď měnu z TLD domény — opravuje špatná data v DB
+        const currency = currencyFromUrl(cp.competitor_url)
+        const rate = EXCHANGE[currency] ?? 1
         return Number(cp.price) * rate // normalize to CZK
       })
     return vals.length ? Math.min(...vals) : null
@@ -1399,13 +1411,15 @@ export default function ProductDetailPage() {
                 const isHistoryOpen = expandedHistoryId === priceRecord?.id
                 const history = priceRecord ? (historyData[priceRecord.id] ?? []) : []
                 const hasPrice = priceRecord?.price != null
+                // Odvoď správnou měnu z TLD domény — opravuje záznamy s nesprávnou měnou v DB
+                const resolvedCurrency = currencyFromUrl(item.url)
                 // Compare in CZK (normalize competitor price to CZK for comparison)
-                const cpPriceCzk = hasPrice ? Number(priceRecord!.price) * (EXCHANGE[priceRecord!.currency ?? 'CZK'] ?? 1) : null
+                const cpPriceCzk = hasPrice ? Number(priceRecord!.price) * (EXCHANGE[resolvedCurrency] ?? 1) : null
                 const isCheaper = cpPriceCzk != null && currentPrice != null && cpPriceCzk < currentPrice
                 const isExpensive = cpPriceCzk != null && currentPrice != null && cpPriceCzk > currentPrice
-                // Display price in competitor's native currency
+                // Display price in competitor's native currency (always from TLD)
                 const dispPrice = hasPrice ? Number(priceRecord!.price) : null
-                const dispCurrency = priceRecord?.currency ?? activeCurrency
+                const dispCurrency = resolvedCurrency
 
                 return (
                   <div key={item.url} className={`rounded-xl border overflow-hidden transition ${
