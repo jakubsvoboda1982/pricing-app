@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Download, FileText, Check, FileSpreadsheet } from 'lucide-react'
+import { API_BASE_URL } from '@/api/client'
 
 const ALL_FIELDS = [
   { id: 'id',            label: 'Product ID',    defaultChecked: true  },
@@ -25,22 +26,31 @@ export default function ExportPage() {
   const handleExport = async (format: 'xlsx' | 'csv') => {
     setExporting(true)
     try {
-      const response = await fetch(`/api/export/products/${format}`, {
+      // Sestavení query params s vybranými poli
+      const selectedFields = Object.entries(checkedFields)
+        .filter(([, checked]) => checked)
+        .map(([id]) => id)
+        .join(',')
+
+      const url = `${API_BASE_URL}/export/products/${format}${selectedFields ? `?fields=${selectedFields}` : ''}`
+      const response = await fetch(url, {
         headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
       })
-      if (response.ok) {
-        const blob = await response.blob()
-        const url = window.URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = `products-${new Date().toISOString().split('T')[0]}.${format}`
-        document.body.appendChild(link)
-        link.click()
-        window.URL.revokeObjectURL(url)
-        document.body.removeChild(link)
-        setExported(format)
-        setTimeout(() => setExported(null), 3000)
+      if (!response.ok) {
+        console.error('Export failed:', response.status, await response.text())
+        return
       }
+      const blob = await response.blob()
+      const objectUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = `products-${new Date().toISOString().split('T')[0]}.${format}`
+      document.body.appendChild(link)
+      link.click()
+      window.URL.revokeObjectURL(objectUrl)
+      document.body.removeChild(link)
+      setExported(format)
+      setTimeout(() => setExported(null), 3000)
     } catch (e) {
       console.error('Export failed:', e)
     } finally {
