@@ -360,6 +360,10 @@ export class APIClient {
     return this.request('POST', `/recommendations/generate/${productId}`)
   }
 
+  async generateAllRecommendations() {
+    return this.request('POST', '/recommendations/generate-all')
+  }
+
   async getRecommendations(status?: string) {
     const params = new URLSearchParams()
     if (status) params.set('status', status)
@@ -367,8 +371,9 @@ export class APIClient {
     return this.request('GET', `/recommendations${qs ? `?${qs}` : ''}`)
   }
 
-  async approveRecommendation(recommendationId: string) {
-    return this.request('POST', `/recommendations/${recommendationId}/approve`)
+  async approveRecommendation(recommendationId: string, overridePriceWithVat?: number) {
+    return this.request('POST', `/recommendations/${recommendationId}/approve`,
+      overridePriceWithVat != null ? { override_price_with_vat: overridePriceWithVat } : undefined)
   }
 
   async rejectRecommendation(recommendationId: string) {
@@ -422,20 +427,44 @@ export class APIClient {
   }
 
   // Seasonality
-  async listSeasonalityRules() {
-    return this.request('GET', '/seasonality')
+  async listSeasonalityRules(category?: string) {
+    const qs = category ? `?category=${encodeURIComponent(category)}` : ''
+    return this.request('GET', `/seasonality/rules${qs}`)
   }
 
-  async getSeasonalityRule(month: number) {
-    return this.request('GET', `/seasonality/${month}`)
+  async createSeasonalityRule(data: {
+    month: number
+    price_multiplier: number
+    season_type?: string
+    name?: string
+    description?: string
+    category?: string
+  }) {
+    return this.request('POST', '/seasonality/rules', data)
   }
 
-  async updateSeasonalityRule(month: number, data: any) {
-    return this.request('PUT', `/seasonality/${month}`, data)
+  async updateSeasonalityRule(ruleId: string, data: {
+    price_multiplier?: number
+    season_type?: string
+    name?: string
+    description?: string
+    is_active?: boolean
+  }) {
+    return this.request('PUT', `/seasonality/rules/${ruleId}`, data)
   }
 
+  async deleteSeasonalityRule(ruleId: string) {
+    return this.request('DELETE', `/seasonality/rules/${ruleId}`)
+  }
+
+  async getSeasonalityCalendar(category?: string) {
+    const qs = category ? `?category=${encodeURIComponent(category)}` : ''
+    return this.request('GET', `/seasonality/calendar${qs}`)
+  }
+
+  // Keep legacy aliases
   async getAnnualCalendar() {
-    return this.request('GET', '/seasonality/calendar/annual')
+    return this.getSeasonalityCalendar()
   }
 
   // Matching

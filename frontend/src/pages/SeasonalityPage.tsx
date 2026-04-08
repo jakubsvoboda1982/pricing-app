@@ -1,322 +1,405 @@
 import { useState } from 'react'
-import { TrendingUp, AlertCircle, CheckCircle } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Trash2, Edit2, Check, X, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { apiClient } from '@/api/client'
 
-interface SeasonalPeriod {
-  month: string
-  shortMonth: string
-  season: string
-  demand: number
-  recommendedPrice: number
-  recommendedDiscount: number
-  strategy: string
-  risk: 'low' | 'medium' | 'high'
+const MONTH_NAMES = [
+  'Leden', 'Únor', 'Březen', 'Duben', 'Květen', 'Červen',
+  'Červenec', 'Srpen', 'Září', 'Říjen', 'Listopad', 'Prosinec',
+]
+const MONTH_SHORT = ['Led', 'Úno', 'Bře', 'Dub', 'Kvě', 'Čvn', 'Čvc', 'Srp', 'Zář', 'Říj', 'Lis', 'Pro']
+
+interface CalendarMonth {
+  month: number
+  month_name: string
+  multiplier: number
+  season_type: string
+  name: string | null
+  rule_id: string | null
 }
 
-const SEASONAL_DATA: SeasonalPeriod[] = [
-  {
-    month: 'Leden',
-    shortMonth: 'Leden',
-    season: 'Nový rok',
-    demand: 85,
-    recommendedPrice: 120,
-    recommendedDiscount: 0,
-    strategy: 'Zdravý životní styl',
-    risk: 'low',
-  },
-  {
-    month: 'Únor',
-    shortMonth: 'Únor',
-    season: 'Valentýn',
-    demand: 70,
-    recommendedPrice: 130,
-    recommendedDiscount: 5,
-    strategy: 'Premium balení',
-    risk: 'low',
-  },
-  {
-    month: 'Březen',
-    shortMonth: 'Březen',
-    season: 'Jaro',
-    demand: 90,
-    recommendedPrice: 110,
-    recommendedDiscount: 0,
-    strategy: 'Jarní očista',
-    risk: 'low',
-  },
-  {
-    month: 'Duben',
-    shortMonth: 'Duben',
-    season: 'Velikonoce',
-    demand: 95,
-    recommendedPrice: 100,
-    recommendedDiscount: 10,
-    strategy: 'Sváteční balení',
-    risk: 'medium',
-  },
-  {
-    month: 'Květen',
-    shortMonth: 'Květen',
-    season: 'Léto',
-    demand: 88,
-    recommendedPrice: 115,
-    recommendedDiscount: 0,
-    strategy: 'Outdoor aktivita',
-    risk: 'low',
-  },
-  {
-    month: 'Červen',
-    shortMonth: 'Červen',
-    season: 'Léto',
-    demand: 92,
-    recommendedPrice: 105,
-    recommendedDiscount: 5,
-    strategy: 'Letní energie',
-    risk: 'low',
-  },
-  {
-    month: 'Červenec',
-    shortMonth: 'Červenec',
-    season: 'Léto',
-    demand: 98,
-    recommendedPrice: 95,
-    recommendedDiscount: 15,
-    strategy: 'Dovolená',
-    risk: 'high',
-  },
-  {
-    month: 'Srpen',
-    shortMonth: 'Srpen',
-    season: 'Léto',
-    demand: 96,
-    recommendedPrice: 100,
-    recommendedDiscount: 10,
-    strategy: 'Letní party',
-    risk: 'high',
-  },
-  {
-    month: 'Září',
-    shortMonth: 'Září',
-    season: 'Podzim',
-    demand: 85,
-    recommendedPrice: 115,
-    recommendedDiscount: 0,
-    strategy: 'Back to school',
-    risk: 'low',
-  },
-  {
-    month: 'Říjen',
-    shortMonth: 'Říjen',
-    season: 'Podzim',
-    demand: 78,
-    recommendedPrice: 125,
-    recommendedDiscount: 0,
-    strategy: 'Halloween',
-    risk: 'medium',
-  },
-  {
-    month: 'Listopad',
-    shortMonth: 'Listopad',
-    season: 'Vánoce',
-    demand: 110,
-    recommendedPrice: 85,
-    recommendedDiscount: 20,
-    strategy: 'Black Friday',
-    risk: 'high',
-  },
-  {
-    month: 'Prosinec',
-    shortMonth: 'Prosinec',
-    season: 'Vánoce',
-    demand: 115,
-    recommendedPrice: 90,
-    recommendedDiscount: 25,
-    strategy: 'Vánoční dárky',
-    risk: 'high',
-  },
+interface Rule {
+  id: string
+  month: number
+  month_name: string
+  price_multiplier: number
+  season_type: string
+  name: string | null
+  description: string | null
+  is_active: boolean
+  category: string | null
+}
+
+type SeasonType = 'peak' | 'off-peak' | 'normal'
+const SEASON_TYPE_OPTS: { value: SeasonType; label: string; color: string }[] = [
+  { value: 'peak',     label: 'Sezóna (peak)',  color: 'text-green-700 bg-green-100 border-green-200' },
+  { value: 'normal',   label: 'Normál',         color: 'text-gray-700 bg-gray-100 border-gray-200'   },
+  { value: 'off-peak', label: 'Mimo sezónu',    color: 'text-blue-700 bg-blue-100 border-blue-200'   },
 ]
 
+function multiplierColor(m: number) {
+  if (m > 1.15) return 'bg-green-500'
+  if (m > 1.05) return 'bg-green-300'
+  if (m < 0.85) return 'bg-red-500'
+  if (m < 0.95) return 'bg-red-300'
+  return 'bg-gray-300'
+}
+
+function multiplierBg(m: number) {
+  if (m > 1.1) return 'bg-green-50 border-green-200'
+  if (m > 1.0) return 'bg-teal-50 border-teal-200'
+  if (m < 0.9) return 'bg-red-50 border-red-200'
+  if (m < 1.0) return 'bg-orange-50 border-orange-200'
+  return 'bg-white border-gray-200'
+}
+
+function multiplierBadge(m: number) {
+  if (m > 1.0) return `+${((m - 1) * 100).toFixed(0)} %`
+  if (m < 1.0) return `−${((1 - m) * 100).toFixed(0)} %`
+  return '0 %'
+}
+
 export default function SeasonalityPage() {
-  const [selectedMonth, setSelectedMonth] = useState(0)
-  const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar')
+  const qc = useQueryClient()
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null)
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
 
-  const current = SEASONAL_DATA[selectedMonth]
-  const avgDemand = Math.round(SEASONAL_DATA.reduce((sum, d) => sum + d.demand, 0) / 12)
+  // Form state for editing / creating
+  const [formMultiplier, setFormMultiplier] = useState(1.0)
+  const [formSeasonType, setFormSeasonType] = useState<SeasonType>('normal')
+  const [formName, setFormName] = useState('')
+  const [formMonth, setFormMonth] = useState(1)
 
-  const getRiskColor = (risk: string) => {
-    switch (risk) {
-      case 'low':
-        return 'bg-green-50 border-green-200 text-green-900'
-      case 'medium':
-        return 'bg-yellow-50 border-yellow-200 text-yellow-900'
-      case 'high':
-        return 'bg-red-50 border-red-200 text-red-900'
-      default:
-        return 'bg-gray-50 border-gray-200 text-gray-900'
+  // Fetch calendar
+  const { data: calendar, isLoading: calLoading } = useQuery<Record<string, CalendarMonth>>({
+    queryKey: ['seasonalityCalendar'],
+    queryFn: () => apiClient.getSeasonalityCalendar(),
+  })
+
+  // Fetch rules list
+  const { data: rules = [], isLoading: rulesLoading } = useQuery<Rule[]>({
+    queryKey: ['seasonalityRules'],
+    queryFn: () => apiClient.listSeasonalityRules(),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: (data: any) => apiClient.createSeasonalityRule(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['seasonalityCalendar'] })
+      qc.invalidateQueries({ queryKey: ['seasonalityRules'] })
+      resetForm()
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => apiClient.updateSeasonalityRule(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['seasonalityCalendar'] })
+      qc.invalidateQueries({ queryKey: ['seasonalityRules'] })
+      setEditingRuleId(null)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiClient.deleteSeasonalityRule(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['seasonalityCalendar'] })
+      qc.invalidateQueries({ queryKey: ['seasonalityRules'] })
+    },
+  })
+
+  const resetForm = () => {
+    setFormMultiplier(1.0)
+    setFormSeasonType('normal')
+    setFormName('')
+    setSelectedMonth(null)
+  }
+
+  const openCreateForMonth = (month: number) => {
+    const existing = rules.find(r => r.month === month)
+    if (existing) {
+      setEditingRuleId(existing.id)
+      setFormMultiplier(existing.price_multiplier)
+      setFormSeasonType(existing.season_type as SeasonType)
+      setFormName(existing.name || '')
+    } else {
+      setEditingRuleId(null)
+      setFormMultiplier(1.0)
+      setFormSeasonType('normal')
+      setFormName('')
+    }
+    setFormMonth(month)
+    setSelectedMonth(month)
+  }
+
+  const handleSave = () => {
+    if (editingRuleId) {
+      updateMutation.mutate({
+        id: editingRuleId,
+        data: { price_multiplier: formMultiplier, season_type: formSeasonType, name: formName },
+      })
+    } else {
+      createMutation.mutate({
+        month: formMonth,
+        price_multiplier: formMultiplier,
+        season_type: formSeasonType,
+        name: formName || null,
+      })
     }
   }
 
+  const calMonths = calendar ? Object.values(calendar) : []
+
+  // Stats
+  const peakCount  = calMonths.filter(m => m.multiplier > 1.05).length
+  const lowCount   = calMonths.filter(m => m.multiplier < 0.95).length
+  const ruleCount  = rules.length
+  const avgMult    = calMonths.length
+    ? calMonths.reduce((s, m) => s + m.multiplier, 0) / calMonths.length
+    : 1.0
+
+  const isLoading = calLoading || rulesLoading
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-5 max-w-5xl">
+
+      {/* ── HEADER ─────────────────────────────────────────────────────── */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Sezónní engine</h1>
-        <p className="text-gray-600 mt-1">Aktuální měsíc: Březen · 1 aktivní sezón · 0 nadcházejících</p>
+        <h1 className="text-2xl font-bold text-gray-900">Sezónní engine</h1>
+        <p className="text-sm text-gray-400 mt-0.5">Nastav cenové multiplikátory pro každý měsíc v roce</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Side - Calendar */}
-        <div className="lg:col-span-2">
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Roční sezónní kalendář</h2>
+      {/* ── KPI STRIP ──────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1.5">Aktivní pravidla</p>
+          <p className="text-2xl font-bold text-gray-900">{ruleCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">z 12 měsíců</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1.5">Peak měsíce</p>
+          <p className="text-2xl font-bold text-green-700">{peakCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">multiplikátor &gt; 1.05</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1.5">Mimo sezónu</p>
+          <p className="text-2xl font-bold text-blue-700">{lowCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">multiplikátor &lt; 0.95</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1.5">Průměrný mult.</p>
+          <p className="text-2xl font-bold text-gray-900">{avgMult.toFixed(2)}×</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {multiplierBadge(avgMult)} vs. základ
+          </p>
+        </div>
+      </div>
 
-            {/* Month Grid */}
-            <div className="grid grid-cols-6 gap-2 mb-6">
-              {SEASONAL_DATA.map((period, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setSelectedMonth(idx)}
-                  className={`p-3 rounded-lg text-sm font-medium transition ${
-                    selectedMonth === idx
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-                  }`}
-                  title={period.month}
-                >
-                  {period.shortMonth.substring(0, 3)}
+      {/* ── MAIN GRID ──────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        {/* Calendar */}
+        <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-5">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-4">Roční přehled</p>
+
+          {isLoading ? (
+            <div className="h-48 flex items-center justify-center text-sm text-gray-400">Načítám…</div>
+          ) : (
+            <>
+              {/* Bar chart */}
+              <div className="flex items-end gap-1.5 h-24 mb-5 bg-gray-50 rounded-lg px-3 pt-2 pb-1">
+                {MONTH_SHORT.map((short, idx) => {
+                  const m = idx + 1
+                  const cal = calMonths.find(c => c.month === m)
+                  const mult = cal?.multiplier ?? 1.0
+                  const heightPct = Math.min(100, Math.max(10, mult * 60))
+                  return (
+                    <button key={m}
+                      onClick={() => openCreateForMonth(m)}
+                      className="flex-1 flex flex-col items-center gap-0.5 group"
+                      title={`${MONTH_NAMES[idx]}: ${mult.toFixed(2)}×`}
+                    >
+                      <div className={`w-full rounded-t transition group-hover:opacity-80 ${
+                        selectedMonth === m ? 'ring-2 ring-blue-400' : ''
+                      } ${multiplierColor(mult)}`}
+                        style={{ height: `${heightPct}%` }} />
+                      <span className="text-[9px] text-gray-400 group-hover:text-gray-600">{short}</span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Month grid */}
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {MONTH_NAMES.map((name, idx) => {
+                  const m = idx + 1
+                  const cal = calMonths.find(c => c.month === m)
+                  const mult = cal?.multiplier ?? 1.0
+                  const hasRule = !!cal?.rule_id
+                  const isSelected = selectedMonth === m
+
+                  return (
+                    <button key={m}
+                      onClick={() => openCreateForMonth(m)}
+                      className={`border rounded-lg p-3 text-left transition ${
+                        isSelected ? 'border-blue-400 shadow-sm ring-2 ring-blue-200' : `${multiplierBg(mult)} hover:opacity-90`
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-semibold text-gray-700">{name}</span>
+                        {hasRule ? <Edit2 size={10} className="text-gray-400" /> : <Plus size={10} className="text-gray-300" />}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {mult > 1 ? <TrendingUp size={11} className="text-green-600" />
+                          : mult < 1 ? <TrendingDown size={11} className="text-red-500" />
+                          : <Minus size={11} className="text-gray-400" />}
+                        <span className={`text-xs font-bold ${
+                          mult > 1.05 ? 'text-green-700' : mult < 0.95 ? 'text-red-600' : 'text-gray-600'
+                        }`}>
+                          {mult.toFixed(2)}×
+                        </span>
+                      </div>
+                      {cal?.name && (
+                        <p className="text-[10px] text-gray-400 truncate mt-0.5">{cal.name}</p>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Editor panel */}
+        <div className="space-y-4">
+          {selectedMonth ? (
+            <div className="bg-white border border-blue-200 rounded-xl p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-sm font-semibold text-gray-800">
+                  {MONTH_NAMES[selectedMonth - 1]}
+                  {editingRuleId && <span className="ml-1 text-xs text-blue-600">(upravuji)</span>}
+                </p>
+                <button onClick={resetForm} className="text-gray-400 hover:text-gray-600">
+                  <X size={16} />
                 </button>
-              ))}
-            </div>
+              </div>
 
-            {/* Demand Chart */}
-            <div className="mb-6">
-              <p className="text-sm font-medium text-gray-700 mb-3">Poptávka během roku</p>
-              <div className="flex items-end justify-between h-32 gap-2 bg-gray-50 p-4 rounded-lg">
-                {SEASONAL_DATA.map((period, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex-1 rounded-t-md transition ${
-                      selectedMonth === idx ? 'bg-blue-600' : 'bg-gray-300 hover:bg-gray-400'
-                    }`}
-                    style={{ height: `${(period.demand / 115) * 100}%` }}
-                    title={`${period.month}: ${period.demand}`}
-                  />
+              {/* Multiplier */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Multiplikátor</label>
+                  <span className={`text-sm font-bold ${
+                    formMultiplier > 1 ? 'text-green-700' : formMultiplier < 1 ? 'text-red-600' : 'text-gray-600'
+                  }`}>
+                    {formMultiplier.toFixed(2)}× ({multiplierBadge(formMultiplier)})
+                  </span>
+                </div>
+                <input type="range" min={0.5} max={2.0} step={0.05} value={formMultiplier}
+                  onChange={e => setFormMultiplier(parseFloat(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                />
+                <div className="flex justify-between text-xs text-gray-400 mt-1">
+                  <span>0.5× (−50 %)</span><span>2.0× (+100 %)</span>
+                </div>
+                <div className="flex gap-1 mt-2">
+                  {[0.8, 0.9, 1.0, 1.1, 1.2, 1.3].map(v => (
+                    <button key={v} onClick={() => setFormMultiplier(v)}
+                      className={`flex-1 text-xs py-1 rounded border transition ${
+                        formMultiplier === v ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                      }`}>
+                      {v.toFixed(1)}×
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Season type */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Typ sezóny</label>
+                <div className="flex flex-col gap-1.5">
+                  {SEASON_TYPE_OPTS.map(opt => (
+                    <button key={opt.value} onClick={() => setFormSeasonType(opt.value)}
+                      className={`text-left px-3 py-2 rounded-lg border text-xs font-medium transition ${
+                        formSeasonType === opt.value ? opt.color : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                      }`}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Name */}
+              <div className="mb-5">
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Název (volitelné)</label>
+                <input type="text" value={formName} onChange={e => setFormName(e.target.value)}
+                  placeholder="Např. Black Friday, Léto…"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+
+              {/* Buttons */}
+              <div className="flex gap-2">
+                <button onClick={handleSave}
+                  disabled={createMutation.isPending || updateMutation.isPending}
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white py-2 rounded-lg text-sm font-medium transition">
+                  <Check size={14} />
+                  {editingRuleId ? 'Uložit změny' : 'Přidat pravidlo'}
+                </button>
+                {editingRuleId && (
+                  <button onClick={() => { deleteMutation.mutate(editingRuleId); resetForm() }}
+                    disabled={deleteMutation.isPending}
+                    className="flex items-center gap-1 border border-red-200 text-red-600 hover:bg-red-50 px-3 py-2 rounded-lg text-sm transition">
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
+
+              {(createMutation.isError || updateMutation.isError) && (
+                <p className="text-xs text-red-600 mt-2">
+                  {(createMutation.error as any)?.message || (updateMutation.error as any)?.message || 'Chyba'}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="bg-white border border-gray-200 rounded-xl p-5 text-center">
+              <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                <Plus size={18} className="text-blue-400" />
+              </div>
+              <p className="text-sm font-medium text-gray-700">Klikni na měsíc</p>
+              <p className="text-xs text-gray-400 mt-1">Nastav multiplikátor a typ sezóny</p>
+            </div>
+          )}
+
+          {/* Rules list */}
+          {rules.length > 0 && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Nastavená pravidla</p>
+              <div className="space-y-1.5">
+                {rules.map(rule => (
+                  <div key={rule.id}
+                    onClick={() => openCreateForMonth(rule.month)}
+                    className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition border ${
+                      selectedMonth === rule.month ? 'bg-blue-50 border-blue-200' : 'hover:bg-gray-50 border-transparent'
+                    }`}>
+                    <div>
+                      <span className="text-xs font-semibold text-gray-700">{MONTH_NAMES[rule.month - 1]}</span>
+                      {rule.name && <span className="text-xs text-gray-400 ml-1.5">{rule.name}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-bold ${
+                        rule.price_multiplier > 1 ? 'text-green-600' : rule.price_multiplier < 1 ? 'text-red-500' : 'text-gray-500'
+                      }`}>
+                        {rule.price_multiplier.toFixed(2)}×
+                      </span>
+                      <button onClick={e => { e.stopPropagation(); deleteMutation.mutate(rule.id) }}
+                        className="text-gray-300 hover:text-red-500 transition">
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
-              <p className="text-xs text-gray-600 mt-2">Průměr: {avgDemand}/115</p>
             </div>
-
-            {/* Selected Month Details */}
-            <div className={`p-4 rounded-lg border ${getRiskColor(current.risk)}`}>
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <p className="font-semibold">{current.month}</p>
-                  <p className="text-sm opacity-75">{current.season}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-2xl font-bold">{current.demand}</p>
-                  <p className="text-xs opacity-75">Poptávka</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-current border-opacity-20">
-                <div>
-                  <p className="text-xs opacity-75">Cena</p>
-                  <p className="font-bold">{current.recommendedPrice} CZK</p>
-                </div>
-                <div>
-                  <p className="text-xs opacity-75">Sleva</p>
-                  <p className="font-bold">{current.recommendedDiscount}%</p>
-                </div>
-                <div>
-                  <p className="text-xs opacity-75">Riziko</p>
-                  <p className="font-bold uppercase text-sm">{current.risk}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Side - Details */}
-        <div className="space-y-4">
-          {/* Strategy Card */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="font-semibold text-gray-900 mb-4 flex items-center space-x-2">
-              <span>💡</span>
-              <span>Strategie</span>
-            </h3>
-            <p className="text-sm text-gray-700 mb-4">{current.strategy}</p>
-            <p className="text-xs text-gray-600">
-              Cílená strategie prodeje pro maximalizaci tržeb v {current.month.toLowerCase()}
-            </p>
-          </div>
-
-          {/* Action Items */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="font-semibold text-gray-900 mb-4 flex items-center space-x-2">
-              <span>✓</span>
-              <span>Akční items</span>
-            </h3>
-            <div className="space-y-3">
-              <div className="flex items-start space-x-3 p-3 bg-blue-50 rounded-lg">
-                <CheckCircle className="text-blue-600 flex-shrink-0 mt-0.5" size={16} />
-                <div>
-                  <p className="text-sm font-medium text-blue-900">Nastavit cenu</p>
-                  <p className="text-xs text-blue-700">na {current.recommendedPrice} CZK</p>
-                </div>
-              </div>
-              {current.recommendedDiscount > 0 && (
-                <div className="flex items-start space-x-3 p-3 bg-yellow-50 rounded-lg">
-                  <AlertCircle className="text-yellow-600 flex-shrink-0 mt-0.5" size={16} />
-                  <div>
-                    <p className="text-sm font-medium text-yellow-900">Připravit slevu</p>
-                    <p className="text-xs text-yellow-700">{current.recommendedDiscount}% pro {current.season}</p>
-                  </div>
-                </div>
-              )}
-              <div className="flex items-start space-x-3 p-3 bg-purple-50 rounded-lg">
-                <TrendingUp className="text-purple-600 flex-shrink-0 mt-0.5" size={16} />
-                <div>
-                  <p className="text-sm font-medium text-purple-900">Marketingová kampaň</p>
-                  <p className="text-xs text-purple-700">Cílená komunikace na sociální sítě</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Risk Indicator */}
-          <div className={`p-4 rounded-lg border ${getRiskColor(current.risk)}`}>
-            <p className="text-sm font-semibold mb-2">Úroveň rizika: {current.risk.toUpperCase()}</p>
-            <p className="text-xs">
-              {current.risk === 'high'
-                ? 'Vysoká poptávka může vést k nedostatku zásob'
-                : current.risk === 'medium'
-                  ? 'Umírněné riziko se zvýšenou poptávkou'
-                  : 'Stabilní poptávka, nízké riziko'}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom - Statistics */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="font-semibold text-gray-900 mb-4">Sezónní statistiky</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="text-center">
-            <p className="text-2xl font-bold text-blue-600">1100</p>
-            <p className="text-xs text-gray-600">Celkový objem</p>
-          </div>
-          <div className="text-center">
-            <p className="text-2xl font-bold text-green-600">115</p>
-            <p className="text-xs text-gray-600">Peak měsíc</p>
-          </div>
-          <div className="text-center">
-            <p className="text-2xl font-bold text-purple-600">70</p>
-            <p className="text-xs text-gray-600">Low měsíc</p>
-          </div>
-          <div className="text-center">
-            <p className="text-2xl font-bold text-orange-600">92</p>
-            <p className="text-xs text-gray-600">Průměr</p>
-          </div>
+          )}
         </div>
       </div>
     </div>
