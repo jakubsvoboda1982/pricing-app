@@ -457,6 +457,38 @@ async def match_all_products(
     }
 
 
+@router.post("/fix-currencies")
+def fix_competitor_currencies(
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Opraví měnu a trh u všech CompetitorProductPrice záznamů podle TLD domény URL.
+    Spustit jednorázově po deployi pro opravu starých dat.
+    """
+    from app.models import CompetitorProductPrice
+    from urllib.parse import urlparse
+
+    _TLD_MAP = {'.cz': ('CZ', 'CZK'), '.sk': ('SK', 'EUR'), '.hu': ('HU', 'HUF')}
+
+    records = db.query(CompetitorProductPrice).all()
+    fixed = 0
+    for r in records:
+        try:
+            host = urlparse(r.competitor_url).hostname or ''
+            for tld, (market, currency) in _TLD_MAP.items():
+                if host.endswith(tld):
+                    if r.market != market or r.currency != currency:
+                        r.market = market
+                        r.currency = currency
+                        fixed += 1
+                    break
+        except Exception:
+            pass
+    db.commit()
+    return {"fixed": fixed, "total": len(records)}
+
+
 @router.put("/alerts/{alert_id}/dismiss", status_code=status.HTTP_204_NO_CONTENT)
 def dismiss_alert(
     alert_id: str,

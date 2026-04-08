@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw, Trash2, ExternalLink, AlertCircle, Globe, WifiOff, Bell, Play, CheckCircle, Loader2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
@@ -135,6 +135,14 @@ export default function CompetitorsPage() {
       setTimeout(() => setPipelineStatus(s => { const n = { ...s }; delete n[competitorId]; return n }), 4000)
     }
   }
+
+  // Oprav měny starých záznamů na pozadí (jednorázová migrace)
+  useEffect(() => {
+    authFetch(`${API_BASE_URL}/competitors/fix-currencies`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` },
+    }).catch(() => {/* silent */})
+  }, [])
 
   const categories = [...new Set(competitors.map((c: Competitor) => c.category).filter(Boolean) as string[])]
   const filteredCompetitors = competitors.filter((c: Competitor) => shouldShowMarket(c.market, selectedMarket))

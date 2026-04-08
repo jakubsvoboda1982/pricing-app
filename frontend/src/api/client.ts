@@ -236,6 +236,14 @@ export class APIClient {
     return this.request('POST', `/competitors/${id}/rescrape`)
   }
 
+  async fixCompetitorCurrencies() {
+    return this.request('POST', '/competitors/fix-currencies')
+  }
+
+  async runMatchAllProducts(competitorId: string) {
+    return this.request('POST', `/competitors/${competitorId}/match-all-products`)
+  }
+
   async getCompetitorPrices(id: string, daysBack: number = 30) {
     return this.request('GET', `/competitors/${id}/prices?days_back=${daysBack}`)
   }

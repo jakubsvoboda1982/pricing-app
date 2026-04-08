@@ -17,6 +17,42 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Mapování TLD domény → měna / trh
+_TLD_TO_CURRENCY = {
+    '.cz': 'CZK',
+    '.sk': 'EUR',
+    '.hu': 'HUF',
+}
+_TLD_TO_MARKET = {
+    '.cz': 'CZ',
+    '.sk': 'SK',
+    '.hu': 'HU',
+}
+
+def _currency_from_url(url: str) -> str:
+    """Odvoď měnu z TLD domény URL. Fallback: CZK."""
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or ''
+        for tld, currency in _TLD_TO_CURRENCY.items():
+            if host.endswith(tld):
+                return currency
+    except Exception:
+        pass
+    return 'CZK'
+
+def _market_from_url(url: str) -> str:
+    """Odvoď trh (CZ/SK/HU) z TLD domény URL. Fallback: CZ."""
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or ''
+        for tld, market in _TLD_TO_MARKET.items():
+            if host.endswith(tld):
+                return market
+    except Exception:
+        pass
+    return 'CZ'
+
 # User agent — emuluje Chrome na Windows
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -264,8 +300,12 @@ async def update_competitor_prices_for_product(product_id: str, db: Session) -> 
                     )
                     db.add(history)
 
-                    # Update the current price
+                    # Update the current price + oprav měnu/trh z domény (pro staré záznamy)
+                    correct_currency = _currency_from_url(comp_price.competitor_url)
+                    correct_market = _market_from_url(comp_price.competitor_url)
                     comp_price.price = price
+                    comp_price.currency = correct_currency
+                    comp_price.market = correct_market
                     comp_price.last_fetched_at = datetime.utcnow()
                     comp_price.fetch_status = 'success'
                     comp_price.fetch_error = None
@@ -273,7 +313,7 @@ async def update_competitor_prices_for_product(product_id: str, db: Session) -> 
                     comp_price.next_update_at = datetime.utcnow() + timedelta(days=7)
                     updated_count += 1
 
-                    logger.info(f"Updated price for {comp_price.competitor_url}: {price}")
+                    logger.info(f"Updated price for {comp_price.competitor_url}: {price} {correct_currency}")
                 else:
                     comp_price.last_fetched_at = datetime.utcnow()
                     comp_price.fetch_status = 'error'
@@ -331,15 +371,19 @@ async def update_all_competitor_prices() -> dict:
                     )
                     db.add(history)
 
-                    # Update the current price
+                    # Update the current price + oprav měnu/trh z domény
+                    correct_currency = _currency_from_url(comp_price.competitor_url)
+                    correct_market = _market_from_url(comp_price.competitor_url)
                     comp_price.price = price
+                    comp_price.currency = correct_currency
+                    comp_price.market = correct_market
                     comp_price.last_fetched_at = datetime.utcnow()
                     comp_price.fetch_status = 'success'
                     comp_price.fetch_error = None
                     comp_price.next_update_at = datetime.utcnow() + timedelta(days=7)
                     total_updated += 1
 
-                    logger.info(f"✓ Updated {comp_price.competitor_url}: {price}")
+                    logger.info(f"✓ Updated {comp_price.competitor_url}: {price} {correct_currency}")
                 else:
                     comp_price.last_fetched_at = datetime.utcnow()
                     comp_price.fetch_status = 'error'

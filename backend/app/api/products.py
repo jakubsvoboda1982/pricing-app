@@ -857,10 +857,12 @@ async def add_competitor_url(
         CompetitorProductPrice.competitor_url == payload.url,
     ).first()
     if not existing_track:
+        _MARKET_TO_CURRENCY = {'CZ': 'CZK', 'SK': 'EUR', 'HU': 'HUF'}
+        _currency = _MARKET_TO_CURRENCY.get(payload.market or 'CZ', 'CZK')
         track = CompetitorProductPrice(
             product_id=product_id,
             competitor_url=payload.url,
-            currency="CZK" if payload.market == "CZ" else "EUR",
+            currency=_currency,
             market=payload.market,
             fetch_status="pending",
         )

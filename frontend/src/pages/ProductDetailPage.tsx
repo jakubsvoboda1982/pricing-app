@@ -480,7 +480,7 @@ export default function ProductDetailPage() {
   const [viewMarket, setViewMarket] = useState<string | null>(null) // null = auto (product.market)
   const [showAddUrl, setShowAddUrl] = useState(false)
   const [newUrl, setNewUrl] = useState('')
-  const [newUrlMarket, setNewUrlMarket] = useState<'CZ' | 'SK'>('CZ')
+  const [newUrlMarket, setNewUrlMarket] = useState<string>('CZ')
   const [addingUrl, setAddingUrl] = useState(false)
   const [editingUrlItem, setEditingUrlItem] = useState<string | null>(null)  // původní URL která se edituje
   const [editingUrlInput, setEditingUrlInput] = useState('')
@@ -1324,7 +1324,7 @@ export default function ProductDetailPage() {
                   <RefreshCw size={12} /> Aktualizovat vše
                 </button>
               )}
-              <button onClick={() => setShowAddUrl(!showAddUrl)}
+              <button onClick={() => { setShowAddUrl(!showAddUrl); setNewUrlMarket(activeMarket) }}
                 className="flex items-center gap-1 text-xs text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200 transition">
                 <Plus size={13} /> Přidat URL
               </button>
@@ -1335,10 +1335,10 @@ export default function ProductDetailPage() {
           {showAddUrl && (
             <div className="mx-5 mt-4 p-4 bg-blue-50 rounded-xl border border-blue-100 space-y-3">
               <div className="flex gap-1">
-                {(['CZ', 'SK'] as const).map(m => (
+                {(['CZ', 'SK', 'HU'] as const).map(m => (
                   <button key={m} onClick={() => setNewUrlMarket(m)}
                     className={`px-3 py-1 rounded-lg text-xs font-medium border transition ${newUrlMarket === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300 text-gray-600'}`}>
-                    {m === 'CZ' ? '🇨🇿 CZ' : '🇸🇰 SK'}
+                    {m === 'CZ' ? '🇨🇿 CZ' : m === 'SK' ? '🇸🇰 SK' : '🇭🇺 HU'}
                   </button>
                 ))}
               </div>
@@ -1387,7 +1387,7 @@ export default function ProductDetailPage() {
                 <Link2 size={36} className="mx-auto text-gray-200 mb-3" />
                 <p className="text-sm text-gray-400 font-medium">Zatím žádní konkurenti</p>
                 <p className="text-xs text-gray-400 mt-1">Přidejte URL produktu u vašich konkurentů.</p>
-                <button onClick={() => setShowAddUrl(true)}
+                <button onClick={() => { setShowAddUrl(true); setNewUrlMarket(activeMarket) }}
                   className="mt-3 flex items-center gap-1 mx-auto text-xs text-blue-600 hover:underline">
                   <Plus size={12} /> Přidat první URL
                 </button>
