@@ -98,7 +98,7 @@ export class APIClient {
 
   // Products
   async getProducts() {
-    return this.request('GET', '/products/')
+    return this.request('GET', '/products')
   }
 
   async getProduct(id: string) {
@@ -106,7 +106,7 @@ export class APIClient {
   }
 
   async createProduct(data: any) {
-    return this.request('POST', '/products/', data)
+    return this.request('POST', '/products', data)
   }
 
   async updateProduct(id: string, data: any) {
