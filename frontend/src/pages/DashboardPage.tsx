@@ -51,7 +51,7 @@ export default function DashboardPage() {
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ['dashboardProducts'],
     queryFn: async () => {
-      const r = await authFetch(`${API_BASE_URL}/products/`)
+      const r = await authFetch(`${API_BASE_URL}/products`)
       if (!r.ok) return []
       return r.json()
     },
