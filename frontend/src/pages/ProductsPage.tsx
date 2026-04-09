@@ -15,7 +15,8 @@ interface Product {
   old_price?: number | null; market?: string; currency?: string
   purchase_price_without_vat?: number | null
   purchase_vat_rate?: number | null; purchase_price_with_vat?: number | null
-  min_price?: number | null; margin?: number | null; hero_score?: number | null
+  min_price?: number | null; margin?: number | null
+  margin_by_market?: Record<string, number> | null; hero_score?: number | null
   lowest_competitor_price?: number | null; stock_quantity?: number | null
   manufacturer?: string | null; catalog_price_vat?: number | null
   catalog_quantity_in_stock?: number | null
@@ -158,13 +159,38 @@ export default function ProductsPage() {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
   })
 
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  /** Vrátí nejrelevantnější marži pro produkt: přednostně pro zvolený trh, jinak první dostupnou */
+  const getMargin = (p: Product, market?: string): number | null => {
+    const mbm = p.margin_by_market
+    if (mbm) {
+      if (market && mbm[market] != null) return mbm[market]
+      const keys = Object.keys(mbm)
+      if (keys.length > 0) return mbm[keys[0]]
+    }
+    return p.margin != null ? Number(p.margin) : null
+  }
+
+  function marginBadge(m: number | null) {
+    if (m == null) return <span className="text-sm text-gray-300">—</span>
+    return (
+      <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${
+        m >= 20 ? 'bg-green-100 text-green-700'
+        : m >= 10 ? 'bg-yellow-100 text-yellow-700'
+        : m > 0 ? 'bg-orange-100 text-orange-700'
+        : 'bg-red-100 text-red-700'
+      }`}>{m.toFixed(1)} %</span>
+    )
+  }
+
   // ── KPI strip ─────────────────────────────────────────────────────────────
   const all = products as Product[]
-  const withPrice    = all.filter(p => p.current_price != null).length
+  const withPrice    = all.filter(p => p.current_price != null || Object.keys(p.prices_by_market ?? {}).length > 0).length
   const noPrice      = all.length - withPrice
-  const withMarginArr = all.filter(p => p.margin != null)
-  const avgMargin    = withMarginArr.length ? withMarginArr.reduce((s, p) => s + Number(p.margin), 0) / withMarginArr.length : null
-  const lowMargin    = withMarginArr.filter(p => Number(p.margin) < 10).length
+  // KPI marže: použij relevantní trh (selectedMarket nebo first available)
+  const withMarginArr = all.map(p => getMargin(p, selectedMarket !== 'ALL' ? selectedMarket : undefined)).filter(m => m != null) as number[]
+  const avgMargin    = withMarginArr.length ? withMarginArr.reduce((s, m) => s + m, 0) / withMarginArr.length : null
+  const lowMargin    = withMarginArr.filter(m => m < 10).length
   const noComp       = all.filter(p => !p.competitor_urls || p.competitor_urls.length === 0).length
 
   return (
@@ -347,8 +373,9 @@ export default function ProductsPage() {
               <>
                 <div className="w-24 text-right">Sklad</div>
                 <div className="w-28 text-right">🇨🇿 CZ</div>
+                <div className="w-20 text-right text-green-600">Marže</div>
                 <div className="w-28 text-right">🇸🇰 SK</div>
-                <div className="w-24 text-right">Marže</div>
+                <div className="w-20 text-right text-blue-600">Marže</div>
               </>
             )}
             <div className="w-28 text-right">Hero</div>
@@ -474,16 +501,9 @@ export default function ProductsPage() {
                       )}
                     </div>
 
-                    {/* Margin */}
+                    {/* Margin (tabs mode — trh z filtru) */}
                     <div className="w-24 text-right flex-shrink-0">
-                      {product.margin != null ? (
-                        <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${
-                          Number(product.margin) >= 20 ? 'bg-green-100 text-green-700'
-                          : Number(product.margin) >= 10 ? 'bg-yellow-100 text-yellow-700'
-                          : Number(product.margin) > 0 ? 'bg-orange-100 text-orange-700'
-                          : 'bg-red-100 text-red-700'
-                        }`}>{Number(product.margin).toFixed(1)} %</span>
-                      ) : <span className="text-sm text-gray-300">—</span>}
+                      {marginBadge(getMargin(product, selectedMarket !== 'ALL' ? selectedMarket : (product.market ?? undefined)))}
                     </div>
                       </>
                     ) : (
@@ -502,7 +522,7 @@ export default function ProductsPage() {
                         )
                       })()}
                     </div>
-                    {/* CZ price (multi mode) */}
+                    {/* CZ price + CZ margin (multi mode) */}
                     <div className="w-28 text-right flex-shrink-0">
                       {(() => {
                         const czData = product.prices_by_market?.['CZ']
@@ -514,7 +534,10 @@ export default function ProductsPage() {
                         )
                       })()}
                     </div>
-                    {/* SK price (multi mode) */}
+                    <div className="w-20 text-right flex-shrink-0">
+                      {marginBadge(product.margin_by_market?.['CZ'] ?? null)}
+                    </div>
+                    {/* SK price + SK margin (multi mode) */}
                     <div className="w-28 text-right flex-shrink-0">
                       {(() => {
                         const skData = product.prices_by_market?.['SK']
@@ -526,16 +549,8 @@ export default function ProductsPage() {
                         )
                       })()}
                     </div>
-                    {/* Margin (multi mode) */}
-                    <div className="w-24 text-right flex-shrink-0">
-                      {product.margin != null ? (
-                        <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${
-                          Number(product.margin) >= 20 ? 'bg-green-100 text-green-700'
-                          : Number(product.margin) >= 10 ? 'bg-yellow-100 text-yellow-700'
-                          : Number(product.margin) > 0 ? 'bg-orange-100 text-orange-700'
-                          : 'bg-red-100 text-red-700'
-                        }`}>{Number(product.margin).toFixed(1)} %</span>
-                      ) : <span className="text-sm text-gray-300">—</span>}
+                    <div className="w-20 text-right flex-shrink-0">
+                      {marginBadge(product.margin_by_market?.['SK'] ?? null)}
                     </div>
                       </>
                     )}

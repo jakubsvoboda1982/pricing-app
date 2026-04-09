@@ -180,10 +180,25 @@ def _calculate_recommendation(product: Product, db: Session) -> dict:
 
 def _rec_to_response(rec: PriceRecommendation, db: Session) -> dict:
     product = db.query(Product).filter(Product.id == rec.product_id).first()
+    # Compute current margin for display (CZ market)
+    current_margin = None
+    if product and rec.current_price_with_vat:
+        from app.api.products import _lower_cost_with_vat
+        vat_rate = getattr(product, 'purchase_vat_rate', None) or Decimal('12.00')
+        cost = _lower_cost_with_vat(
+            getattr(product, 'purchase_price_without_vat', None),
+            getattr(product, 'manufacturing_cost', None),
+            vat_rate
+        )
+        if cost and rec.current_price_with_vat > 0:
+            current_margin = round(float(
+                (rec.current_price_with_vat - cost) / rec.current_price_with_vat * 100
+            ), 1)
     return {
         "id": str(rec.id),
         "product_id": str(rec.product_id),
         "product_name": product.name if product else None,
+        "current_margin": current_margin,
         "recommended_price_without_vat": float(rec.recommended_price_without_vat),
         "recommended_price_with_vat": float(rec.recommended_price_with_vat),
         "current_price_with_vat": float(rec.current_price_with_vat) if rec.current_price_with_vat else None,

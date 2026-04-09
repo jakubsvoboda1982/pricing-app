@@ -90,6 +90,8 @@ def get_simulator_products(
                 round(float(p.purchase_price_without_vat) * 1.21, 2)
                 if p.purchase_price_without_vat else None
             ),
+            "market": price.market if price else "CZ",
+            "currency": price.currency if price else "CZK",
         })
     return result
 

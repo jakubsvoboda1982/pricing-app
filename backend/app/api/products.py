@@ -155,18 +155,31 @@ def _enrich_with_price(
     EXCHANGE_CZK = {'CZK': Decimal('1'), 'EUR': Decimal('24.5'), 'HUF': Decimal('0.0655')}
     price_market = price.market if price else 'CZ'
     price_currency = price.currency if price else 'CZK'
-    # Přepočet cost_with_vat do měny produktového trhu (pro správnou marži)
-    cost_with_vat_in_market = None
-    if cost_with_vat is not None and price_currency != 'CZK':
-        rate = EXCHANGE_CZK.get(price_currency, Decimal('1'))
-        cost_with_vat_in_market = round(cost_with_vat / rate, 4)
-    else:
-        cost_with_vat_in_market = cost_with_vat
 
-    margin = None
-    if current_price and cost_with_vat_in_market and current_price > 0:
-        margin = (current_price - cost_with_vat_in_market) / current_price * Decimal('100')
-        margin = round(margin, 2)
+    def _margin_for_price(sell_price, currency: str) -> Optional[Decimal]:
+        """Marže = (prodejní − nákladová v měně trhu) / prodejní × 100"""
+        if not sell_price or not cost_with_vat or sell_price <= 0:
+            return None
+        rate = EXCHANGE_CZK.get(currency, Decimal('1'))
+        cost_in_currency = round(cost_with_vat / rate, 4)
+        m = (Decimal(str(sell_price)) - cost_in_currency) / Decimal(str(sell_price)) * Decimal('100')
+        return round(m, 2)
+
+    # Marže pro "výchozí" cenu (zpětná kompatibilita — primární záznam z Price)
+    margin = _margin_for_price(current_price, price_currency)
+
+    # Marže per trh — pro každý trh s dostupnou cenou
+    margin_by_market: dict = {}
+    pbm = _prices_by_market or {}
+    for mkt, mkt_data in pbm.items():
+        mkt_price = mkt_data.get('price')
+        mkt_currency = mkt_data.get('currency', 'CZK')
+        m = _margin_for_price(mkt_price, mkt_currency)
+        if m is not None:
+            margin_by_market[mkt] = float(m)
+    # Pokud není prices_by_market, použij primární cenu
+    if not margin_by_market and margin is not None:
+        margin_by_market[price_market] = float(margin)
 
     # ── Competitor prices ──────────────────────────────────────────────────
     lowest_competitor_price = None
@@ -264,6 +277,7 @@ def _enrich_with_price(
         'manufacturing_cost_with_vat': manufacturing_cost_with_vat,
         'min_price': min_price,
         'margin': margin,
+        'margin_by_market': margin_by_market,
         'hero_score': hero_score,
         'lowest_competitor_price': lowest_competitor_price,
         'competitor_products': competitor_products,

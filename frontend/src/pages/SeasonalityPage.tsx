@@ -314,6 +314,24 @@ export default function SeasonalityPage() {
                 </div>
               </div>
 
+              {/* Margin impact hint */}
+              {formMult !== 1.0 && (() => {
+                const BASE_MARGIN = 0.28
+                const newMarginPct = (1 - (1 - BASE_MARGIN) / formMult) * 100
+                const delta = newMarginPct - BASE_MARGIN * 100
+                return (
+                  <div className="mb-4 flex items-start gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                    <Info size={13} className="text-gray-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-gray-500">
+                      Při základní marži <span className="font-medium">28 %</span> a multiplikátoru <span className="font-medium">{formMult.toFixed(2)}×</span>
+                      {' → '}odhadovaná marže <span className={`font-bold ${newMarginPct >= 28 ? 'text-emerald-700' : 'text-red-600'}`}>{newMarginPct.toFixed(1)} %</span>
+                      {' '}
+                      <span className={`text-xs ${delta >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>({delta > 0 ? '+' : ''}{delta.toFixed(1)} %)</span>
+                    </p>
+                  </div>
+                )
+              })()}
+
               {/* Name */}
               <div className="mb-5">
                 <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">

@@ -11,6 +11,7 @@ interface Product {
   id: string; name: string
   base_price: number; base_margin: number; base_sales: number
   purchase_price_with_vat?: number | null
+  market?: string; currency?: string
 }
 
 const FALLBACK: Product[] = [

@@ -87,6 +87,7 @@ class ProductResponse(BaseModel):
     # Vypočítané hodnoty
     purchase_price_with_vat: Optional[Decimal] = None  # Computed: purchase_price_without_vat * (1 + purchase_vat_rate/100)
     margin: Optional[Decimal] = None       # Marže v % = (current - purchase_with_vat) / current * 100
+    margin_by_market: Optional[Dict[str, float]] = None  # {CZ: 12.0, SK: 35.9} — marže per trh
     hero_score: Optional[int] = None       # 0–100
     lowest_competitor_price: Optional[Decimal] = None  # Minimální cena od konkurence (s DPH)
     competitor_products: Optional[List[CompetitorProductPriceResponse]] = None  # Ceny od jednotlivých konkurentů

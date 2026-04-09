@@ -14,6 +14,7 @@ interface Recommendation {
   recommended_price_without_vat: number
   recommended_price_with_vat: number
   current_price_with_vat: number | null
+  current_margin: number | null
   margin_change_percent: number | null
   expected_revenue_impact_percent: number | null
   status: string
@@ -233,6 +234,11 @@ export default function RecommendationsPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-3 flex-wrap">
+                      {rec.current_margin != null && (
+                        <span className="text-xs text-gray-400">
+                          Marže nyní: <span className={rec.current_margin >= 20 ? 'text-emerald-500' : rec.current_margin >= 10 ? 'text-yellow-500' : 'text-red-500'}>{rec.current_margin.toFixed(1)} %</span>
+                        </span>
+                      )}
                       {rec.margin_change_percent != null && (
                         <span className={`text-xs ${rec.margin_change_percent >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                           Marže {rec.margin_change_percent > 0 ? '+' : ''}{rec.margin_change_percent.toFixed(1)} %

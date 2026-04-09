@@ -55,7 +55,7 @@ interface Product {
   purchase_price_without_vat?: number | null; purchase_vat_rate?: number | null
   purchase_price_with_vat?: number | null; manufacturing_cost?: number | null
   manufacturing_cost_with_vat?: number | null; min_price?: number | null
-  margin?: number | null; hero_score?: number | null
+  margin?: number | null; margin_by_market?: Record<string, number> | null; hero_score?: number | null
   lowest_competitor_price?: number | null; stock_quantity?: number | null
   manufacturer?: string | null
   catalog_price_vat?: number | null
@@ -743,7 +743,6 @@ export default function ProductDetailPage() {
   const manufacturingCostWithVat = product.manufacturing_cost_with_vat != null ? Number(product.manufacturing_cost_with_vat) : null
   const purchaseVatRate  = product.purchase_vat_rate != null ? Number(product.purchase_vat_rate) : 12
   const minPrice         = product.min_price != null ? Number(product.min_price) : null
-  const margin           = product.margin != null ? Number(product.margin) : null
   const heroScore        = product.hero_score ?? 0
   const competitorUrls   = product.competitor_urls || []
   // latestPrices jsou ALL záznamy — filtrujeme per-market v renderování
@@ -759,6 +758,17 @@ export default function ProductDetailPage() {
   if (!availableMarkets.includes('CZ') && !availableMarkets.includes('SK')) availableMarkets.unshift('CZ')
   const activeMarket = viewMarket ?? product.market ?? availableMarkets[0] ?? 'CZ'
   const activeCurrency = MARKET_CURRENCY[activeMarket] ?? 'CZK'
+
+  // Marže pro aktivní trh — přednostně z margin_by_market[activeMarket], fallback na globální margin
+  const margin = (() => {
+    const mbm = product.margin_by_market
+    if (mbm) {
+      if (mbm[activeMarket] != null) return mbm[activeMarket]
+      const keys = Object.keys(mbm)
+      if (keys.length > 0) return mbm[keys[0]]
+    }
+    return product.margin != null ? Number(product.margin) : null
+  })()
 
   // Display name: use feed name for active market when available
   const displayName = (activeMarket !== 'CZ' && product.market_names?.[activeMarket])
