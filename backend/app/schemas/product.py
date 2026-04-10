@@ -49,6 +49,7 @@ class CompetitorProductPriceResponse(BaseModel):
     id: Optional[UUID] = None
     product_id: Optional[UUID] = None
     competitor_url: str
+    variant_label: Optional[str] = None
     price: Optional[Decimal] = None  # Price with VAT
     currency: str = "CZK"
     market: str = "CZ"

@@ -15,6 +15,9 @@ class CompetitorProductPrice(Base):
     # Competitor URL from product.competitor_urls
     competitor_url = Column(String, nullable=False)
 
+    # Variant info — which specific variant is tracked (e.g. "100g / Čokoláda")
+    variant_label = Column(String(200), nullable=True)
+
     # Price information
     price = Column(Numeric(12, 2), nullable=True)  # Price with VAT
     currency = Column(String, default="CZK", nullable=False)

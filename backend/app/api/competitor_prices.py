@@ -8,7 +8,7 @@ from sqlalchemy import desc
 from app.database import get_db
 from app.models import Product, CompetitorProductPrice, CompetitorPriceHistory
 from app.schemas.product import CompetitorProductPriceResponse, ProductResponse
-from app.competitor_scraper import scrape_competitor_price, update_all_competitor_prices, _currency_from_url, _market_from_url
+from app.competitor_scraper import scrape_competitor_price, update_all_competitor_prices, _currency_from_url, _market_from_url, preview_competitor_url
 from app.middleware.auth import verify_token
 from pydantic import BaseModel
 from uuid import UUID
@@ -29,6 +29,28 @@ router = APIRouter(prefix="/api/competitor-prices", tags=["competitor-prices"])
 class ManualPriceIn(BaseModel):
     price: Decimal
     note: Optional[str] = None
+
+
+class TrackUrlIn(BaseModel):
+    url: str
+    variant_label: Optional[str] = None
+
+
+class PreviewUrlIn(BaseModel):
+    url: str
+
+
+@router.post("/preview")
+async def preview_url(
+    data: PreviewUrlIn,
+    payload: dict = Depends(verify_token),
+):
+    """
+    Scrape a competitor URL and return a structured preview before saving.
+    Returns detected product name, price, and available variants (if any).
+    """
+    result = await preview_competitor_url(data.url)
+    return result
 
 
 @router.get("/{product_id}", response_model=List[CompetitorProductPriceResponse])
@@ -67,18 +89,20 @@ def get_competitor_prices(
 @router.post("/{product_id}/track")
 def add_competitor_url_tracking(
     product_id: UUID,
-    url: str,
+    data: TrackUrlIn,
     payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """
     Add a competitor URL to track for this product.
+    Accepts JSON body: {url, variant_label?}.
     Creates a new CompetitorProductPrice record.
     """
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
+    url = data.url.strip()
     # Check if already tracking this URL
     existing = db.query(CompetitorProductPrice).filter(
         CompetitorProductPrice.product_id == product_id,
@@ -92,6 +116,7 @@ def add_competitor_url_tracking(
     comp_price = CompetitorProductPrice(
         product_id=product_id,
         competitor_url=url,
+        variant_label=data.variant_label,
         currency=_currency_from_url(url),
         market=_market_from_url(url),
         fetch_status="pending",

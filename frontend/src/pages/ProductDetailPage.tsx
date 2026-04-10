@@ -74,6 +74,7 @@ interface CompetitorPriceRecord {
   id: string; competitor_url: string; price: number | null
   currency: string; market: string; last_fetched_at: string | null
   fetch_status: string | null; fetch_error: string | null
+  variant_label?: string | null
 }
 
 interface PriceHistoryEntry { price: number; recorded_at: string }
@@ -492,6 +493,13 @@ export default function ProductDetailPage() {
   const [newUrl, setNewUrl] = useState('')
   const [newUrlMarket, setNewUrlMarket] = useState<string>('CZ')
   const [addingUrl, setAddingUrl] = useState(false)
+  const [loadingPreview, setLoadingPreview] = useState(false)
+  const [urlPreview, setUrlPreview] = useState<{
+    ok: boolean; error: string | null; detected_name: string | null
+    detected_price: number | null; detected_currency: string
+    variants: Array<{ label: string; url: string | null; price: number | null }>
+  } | null>(null)
+  const [selectedVariant, setSelectedVariant] = useState<{ label: string; url: string | null; price: number | null } | null>(null)
   const [editingUrlItem, setEditingUrlItem] = useState<string | null>(null)  // původní URL která se edituje
   const [editingUrlInput, setEditingUrlInput] = useState('')
   const [savingUrl, setSavingUrl] = useState(false)
@@ -622,22 +630,52 @@ export default function ProductDetailPage() {
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
-  const handleAddUrl = async () => {
+  const handlePreviewUrl = async () => {
     if (!newUrl.trim()) return
-    setAddingUrl(true)
+    setLoadingPreview(true)
+    setUrlPreview(null)
+    setSelectedVariant(null)
     try {
-      const res = await authFetch(`${API_BASE_URL}/products/${id}/competitor-urls`, {
+      const res = await authFetch(`${API_BASE_URL}/competitor-prices/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ url: newUrl, market: newUrlMarket }),
+        body: JSON.stringify({ url: newUrl.trim() }),
       })
-      if (!res.ok) throw new Error('Chyba')
+      if (!res.ok) throw new Error('Chyba serveru')
+      const data = await res.json()
+      setUrlPreview(data)
+    } catch {
+      setUrlPreview({ ok: false, error: 'Nepodařilo se načíst stránku.', detected_name: null, detected_price: null, detected_currency: 'CZK', variants: [] })
+    } finally { setLoadingPreview(false) }
+  }
+
+  const handleConfirmUrl = async () => {
+    const finalUrl = selectedVariant?.url || newUrl.trim()
+    if (!finalUrl) return
+    setAddingUrl(true)
+    try {
+      // 1. Add competitor URL to product (for product.competitor_urls list)
+      const res1 = await authFetch(`${API_BASE_URL}/products/${id}/competitor-urls`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ url: finalUrl, market: newUrlMarket }),
+      })
+      if (!res1.ok && res1.status !== 400) throw new Error('Chyba')
+      // 2. Add tracking record with variant_label
+      await authFetch(`${API_BASE_URL}/competitor-prices/${id}/track`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ url: finalUrl, variant_label: selectedVariant?.label ?? null }),
+      })
       queryClient.invalidateQueries({ queryKey: ['product', id] })
       queryClient.invalidateQueries({ queryKey: ['competitor-prices', id] })
-      setNewUrl(''); setShowAddUrl(false)
+      setNewUrl(''); setShowAddUrl(false); setUrlPreview(null); setSelectedVariant(null)
       setTimeout(() => refetchCompetitorPrices(), 2000)
     } catch { /* ignore */ } finally { setAddingUrl(false) }
   }
+
+  // Keep for backward compat (edit flow still uses simple add)
+  const handleAddUrl = handleConfirmUrl
 
   const handleSetPrice = () => {
     const cp = parseFloat(priceForm.current_price.replace(',', '.'))
@@ -1353,27 +1391,103 @@ export default function ProductDetailPage() {
             </div>
           </div>
 
-          {/* Add URL form */}
+          {/* Add URL form — two-step: URL input → preview → confirm */}
           {showAddUrl && (
             <div className="mx-5 mt-4 p-4 bg-blue-50 rounded-xl border border-blue-100 space-y-3">
-              <div className="flex gap-1">
-                {(['CZ', 'SK', 'HU'] as const).map(m => (
-                  <button key={m} onClick={() => setNewUrlMarket(m)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium border transition ${newUrlMarket === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300 text-gray-600'}`}>
-                    {m === 'CZ' ? '🇨🇿 CZ' : m === 'SK' ? '🇸🇰 SK' : '🇭🇺 HU'}
+
+              {/* Step 1: URL input */}
+              <div className="space-y-2">
+                <div className="flex gap-1">
+                  {(['CZ', 'SK', 'HU'] as const).map(m => (
+                    <button key={m} onClick={() => setNewUrlMarket(m)}
+                      className={`px-3 py-1 rounded-lg text-xs font-medium border transition ${newUrlMarket === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300 text-gray-600'}`}>
+                      {m === 'CZ' ? '🇨🇿 CZ' : m === 'SK' ? '🇸🇰 SK' : '🇭🇺 HU'}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input type="url" value={newUrl}
+                    onChange={(e) => { setNewUrl(e.target.value); setUrlPreview(null); setSelectedVariant(null) }}
+                    onKeyDown={(e) => e.key === 'Enter' && !urlPreview && handlePreviewUrl()}
+                    placeholder="https://grizly.cz/produkt/..." autoFocus
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <button onClick={handlePreviewUrl} disabled={loadingPreview || !newUrl.trim()}
+                    className="bg-gray-700 hover:bg-gray-800 disabled:bg-gray-300 text-white px-3 py-2 rounded-lg text-xs font-medium transition whitespace-nowrap">
+                    {loadingPreview ? 'Načítám…' : 'Načíst stránku'}
                   </button>
-                ))}
+                </div>
               </div>
-              <input type="url" value={newUrl} onChange={(e) => setNewUrl(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddUrl()}
-                placeholder="https://grizly.cz/produkt/..." autoFocus
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+
+              {/* Step 2: Preview result */}
+              {urlPreview && (
+                <div className="border border-blue-200 rounded-lg bg-white p-3 space-y-2">
+                  {!urlPreview.ok ? (
+                    <p className="text-xs text-red-600">{urlPreview.error}</p>
+                  ) : (
+                    <>
+                      {/* Detected product info */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          {urlPreview.detected_name && (
+                            <p className="text-sm font-medium text-gray-800 truncate">{urlPreview.detected_name}</p>
+                          )}
+                          {urlPreview.detected_price != null ? (
+                            <p className="text-xs text-emerald-700 font-semibold mt-0.5">
+                              {urlPreview.detected_price.toLocaleString('cs-CZ')} {urlPreview.detected_currency}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-orange-600 mt-0.5">Cena nebyla nalezena — bude nastavena ručně</p>
+                          )}
+                        </div>
+                        <span className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5 flex-shrink-0">✓ Načteno</span>
+                      </div>
+
+                      {/* Variant selection (if variants detected) */}
+                      {urlPreview.variants.length > 1 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-600 mb-1.5">
+                            Detekováno {urlPreview.variants.length} variant — vyber tu, která odpovídá tvému produktu:
+                          </p>
+                          <div className="max-h-40 overflow-y-auto space-y-1">
+                            {urlPreview.variants.map((v, i) => (
+                              <button key={i} onClick={() => setSelectedVariant(selectedVariant?.label === v.label ? null : v)}
+                                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-xs text-left transition ${
+                                  selectedVariant?.label === v.label
+                                    ? 'bg-blue-600 text-white border-blue-600'
+                                    : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-blue-50 hover:border-blue-300'
+                                }`}>
+                                <span className="font-medium truncate">{v.label}</span>
+                                {v.price != null && (
+                                  <span className={`ml-2 flex-shrink-0 font-semibold ${selectedVariant?.label === v.label ? 'text-blue-100' : 'text-emerald-700'}`}>
+                                    {v.price.toLocaleString('cs-CZ')} {urlPreview.detected_currency}
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                          {selectedVariant && selectedVariant.url && selectedVariant.url !== newUrl && (
+                            <p className="text-xs text-blue-600 mt-1.5">
+                              Bude sledována URL: <span className="font-mono break-all">{selectedVariant.url}</span>
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Actions */}
               <div className="flex gap-2">
-                <button onClick={handleAddUrl} disabled={addingUrl || !newUrl.trim()}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-1.5 rounded-lg text-xs font-medium transition">
-                  {addingUrl ? 'Přidávám...' : 'Přidat a načíst cenu'}
-                </button>
-                <button onClick={() => { setShowAddUrl(false); setNewUrl('') }}
+                {urlPreview?.ok && (
+                  <button
+                    onClick={handleConfirmUrl}
+                    disabled={addingUrl || (urlPreview.variants.length > 1 && !selectedVariant)}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-1.5 rounded-lg text-xs font-medium transition">
+                    {addingUrl ? 'Přidávám...' : selectedVariant ? `Přidat variantu "${selectedVariant.label}"` : 'Přidat a sledovat cenu'}
+                  </button>
+                )}
+                <button onClick={() => { setShowAddUrl(false); setNewUrl(''); setUrlPreview(null); setSelectedVariant(null) }}
                   className="text-gray-500 px-3 py-1.5 rounded-lg text-xs hover:bg-gray-100">Zrušit</button>
               </div>
             </div>
@@ -1444,11 +1558,18 @@ export default function ProductDetailPage() {
 
                       {/* Name + link */}
                       <div className="flex-1 min-w-0">
-                        <a href={item.url} target="_blank" rel="noopener noreferrer"
-                          className="text-sm font-medium text-gray-800 hover:text-blue-600 flex items-center gap-1 truncate group">
-                          {item.name || getDomain(item.url)}
-                          <ExternalLink size={10} className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </a>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <a href={item.url} target="_blank" rel="noopener noreferrer"
+                            className="text-sm font-medium text-gray-800 hover:text-blue-600 flex items-center gap-1 truncate group">
+                            {item.name || getDomain(item.url)}
+                            <ExternalLink size={10} className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </a>
+                          {priceRecord?.variant_label && (
+                            <span className="text-[10px] bg-blue-100 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 font-medium flex-shrink-0">
+                              {priceRecord.variant_label}
+                            </span>
+                          )}
+                        </div>
                         <a href={item.url} target="_blank" rel="noopener noreferrer"
                           className="text-xs text-blue-400 hover:text-blue-600 hover:underline flex items-center gap-0.5 truncate mt-0.5">
                           <ExternalLink size={9} className="flex-shrink-0" />

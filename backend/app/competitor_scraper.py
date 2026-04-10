@@ -257,6 +257,115 @@ def extract_price(html: str, url: str) -> Optional[Decimal]:
     return None
 
 
+def _extract_product_name(html: str) -> Optional[str]:
+    """Extrahuj název produktu z HTML (JSON-LD → og:title → <title>)."""
+    # 1. JSON-LD name
+    for block in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                             html, re.DOTALL | re.IGNORECASE):
+        try:
+            data = json.loads(block)
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict) and '@graph' in item:
+                    items = items + item['@graph']
+                if isinstance(item, dict) and item.get('@type', '').lower() in ('product', 'productgroup'):
+                    name = item.get('name')
+                    if name and isinstance(name, str):
+                        return name.strip()
+        except Exception:
+            pass
+    # 2. og:title
+    m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]*content=["\']([^"\']{3,200})["\']', html, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r'<meta[^>]+content=["\']([^"\']{3,200})["\'][^>]*property=["\']og:title["\']', html, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    # 3. <title>
+    m = re.search(r'<title[^>]*>([^<]{3,200})</title>', html, re.IGNORECASE)
+    if m:
+        # Strip shop name suffix (after " | " or " - ")
+        title = m.group(1).strip()
+        for sep in [' | ', ' – ', ' - ', ' :: ']:
+            if sep in title:
+                title = title.split(sep)[0].strip()
+        if len(title) >= 3:
+            return title
+    return None
+
+
+def _detect_variants(html: str) -> list[dict]:
+    """
+    Detekuj varianty produktu z HTML.
+    Vrátí seznam: [{label: str, url: str|None, price: float|None}]
+    """
+    variants: list[dict] = []
+
+    # 1. JSON-LD hasVariant (ProductGroup nebo Product)
+    for block in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                             html, re.DOTALL | re.IGNORECASE):
+        try:
+            data = json.loads(block)
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict) and '@graph' in item:
+                    items = items + item['@graph']
+                if not isinstance(item, dict):
+                    continue
+                # hasVariant on Product or ProductGroup
+                has_variant = item.get('hasVariant') or (
+                    item.get('@type', '').lower() == 'productgroup' and item.get('hasVariant')
+                )
+                if has_variant and isinstance(has_variant, list):
+                    for v in has_variant:
+                        if not isinstance(v, dict):
+                            continue
+                        label = v.get('name', '')
+                        if not label:
+                            # Build label from variesBy attributes
+                            attrs = v.get('additionalProperty', [])
+                            if isinstance(attrs, list):
+                                label = ' / '.join(
+                                    a.get('value', '') for a in attrs
+                                    if isinstance(a, dict) and a.get('value')
+                                )
+                        offer = v.get('offers') or {}
+                        if isinstance(offer, list):
+                            offer = offer[0] if offer else {}
+                        price_raw = offer.get('price') if isinstance(offer, dict) else None
+                        price_val = None
+                        if price_raw is not None:
+                            p = _clean_price(str(price_raw))
+                            price_val = float(p) if p else None
+                        url_val = v.get('url') or (offer.get('url') if isinstance(offer, dict) else None)
+                        if label:
+                            variants.append({'label': str(label).strip(), 'url': url_val, 'price': price_val})
+                    if variants:
+                        return variants
+        except Exception:
+            pass
+
+    # 2. Shoptet / WooCommerce / PrestaShop variant buttons in HTML
+    # Look for <option> or data-variant / data-option elements
+    # Pattern: <option value="..." data-price="...">Label</option>
+    option_pattern = re.compile(
+        r'<option\b[^>]*value=["\']([^"\']*)["\'][^>]*>([^<]{2,80})</option>',
+        re.IGNORECASE
+    )
+    for m in option_pattern.finditer(html):
+        val, label = m.group(1).strip(), m.group(2).strip()
+        # Filter out obviously non-variant options
+        if not val or label.lower() in ('vyberte', 'choose', 'select', '-- vyberte --', ''):
+            continue
+        if any(skip in label.lower() for skip in ('košík', 'cart', 'compare', 'wishlist')):
+            continue
+        variants.append({'label': label, 'url': None, 'price': None})
+        if len(variants) >= 20:
+            break
+
+    return variants
+
+
 async def scrape_competitor_price(url: str) -> Optional[Decimal]:
     """
     Scrape a single competitor URL and return the price.
@@ -270,6 +379,38 @@ async def scrape_competitor_price(url: str) -> Optional[Decimal]:
     except Exception as e:
         logger.error(f"Error scraping {url}: {str(e)}")
     return None
+
+
+async def preview_competitor_url(url: str) -> dict:
+    """
+    Fetch a competitor URL and return a structured preview:
+    detected_name, detected_price, detected_currency, variants list.
+    Used before saving a tracked URL so the user can confirm/select the right variant.
+    """
+    html = await fetch_page_content(url)
+    if not html:
+        return {
+            "ok": False,
+            "error": "Stránku se nepodařilo načíst (timeout nebo blokování)",
+            "detected_name": None,
+            "detected_price": None,
+            "detected_currency": _currency_from_url(url),
+            "variants": [],
+        }
+
+    name = _extract_product_name(html)
+    price = extract_price(html, url)
+    variants = _detect_variants(html)
+    currency = _currency_from_url(url)
+
+    return {
+        "ok": True,
+        "error": None,
+        "detected_name": name,
+        "detected_price": float(price) if price else None,
+        "detected_currency": currency,
+        "variants": variants,
+    }
 
 
 async def update_competitor_prices_for_product(product_id: str, db: Session) -> int:

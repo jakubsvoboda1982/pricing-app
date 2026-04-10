@@ -169,6 +169,7 @@ def _ensure_schema():
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_divisor INTEGER DEFAULT 1",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_hash VARCHAR",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_expires_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE competitor_product_prices ADD COLUMN IF NOT EXISTS variant_label VARCHAR(200)",
         # Fix FK in competitor_price_history: must reference competitor_product_prices, not competitor_prices
         # Step 1: Delete orphaned history rows that reference non-existent competitor_product_prices
         """DELETE FROM competitor_price_history

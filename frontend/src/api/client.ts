@@ -121,6 +121,21 @@ export class APIClient {
     return this.request('POST', `/products/${productId}/competitor-urls`, { url, name, market: market || 'CZ' })
   }
 
+  async previewCompetitorUrl(url: string): Promise<{
+    ok: boolean
+    error: string | null
+    detected_name: string | null
+    detected_price: number | null
+    detected_currency: string
+    variants: Array<{ label: string; url: string | null; price: number | null }>
+  }> {
+    return this.request('POST', '/competitor-prices/preview', { url })
+  }
+
+  async trackCompetitorUrl(productId: string, url: string, variantLabel?: string) {
+    return this.request('POST', `/competitor-prices/${productId}/track`, { url, variant_label: variantLabel ?? null })
+  }
+
   async removeCompetitorUrl(productId: string, url: string) {
     return this.request('DELETE', `/products/${productId}/competitor-urls?url=${encodeURIComponent(url)}`)
   }
