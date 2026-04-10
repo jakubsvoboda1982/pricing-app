@@ -729,14 +729,20 @@ export default function ProductDetailPage() {
     }
   }
 
+  const [refreshingAll, setRefreshingAll] = useState(false)
+
   const handleRefreshAll = async () => {
-    await authFetch(`${API_BASE_URL}/competitor-prices/${id}/refresh`, {
-      method: 'POST', headers: authHeaders(),
-    })
-    refetchCompetitorPrices()
-    queryClient.invalidateQueries({ queryKey: ['product', id] })
-    // Obnov i Vývoj cen — mohl přibýt nový záznam z nuties.cz/sk
-    queryClient.invalidateQueries({ queryKey: ['product-prices', id] })
+    setRefreshingAll(true)
+    try {
+      await authFetch(`${API_BASE_URL}/competitor-prices/${id}/refresh`, {
+        method: 'POST', headers: authHeaders(),
+      })
+      refetchCompetitorPrices()
+      queryClient.invalidateQueries({ queryKey: ['product', id] })
+      queryClient.invalidateQueries({ queryKey: ['product-prices', id] })
+    } finally {
+      setRefreshingAll(false)
+    }
   }
 
   const handleSaveManualPrice = async (compPriceId: string) => {
@@ -1381,9 +1387,10 @@ export default function ProductDetailPage() {
             </h2>
             <div className="flex gap-2">
               {competitorUrls.length > 0 && (
-                <button onClick={handleRefreshAll}
-                  className="flex items-center gap-1 text-xs text-gray-600 hover:bg-gray-100 px-2.5 py-1.5 rounded-lg border border-gray-200 transition">
-                  <RefreshCw size={12} /> Aktualizovat vše
+                <button onClick={handleRefreshAll} disabled={refreshingAll}
+                  className="flex items-center gap-1 text-xs text-gray-600 hover:bg-gray-100 px-2.5 py-1.5 rounded-lg border border-gray-200 transition disabled:opacity-60 disabled:cursor-wait">
+                  <RefreshCw size={12} className={refreshingAll ? 'animate-spin' : ''} />
+                  {refreshingAll ? 'Aktualizuji…' : 'Aktualizovat vše'}
                 </button>
               )}
               <button onClick={() => { setShowAddUrl(!showAddUrl); setNewUrlMarket(activeMarket) }}
