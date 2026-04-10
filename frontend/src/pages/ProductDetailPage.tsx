@@ -735,6 +735,8 @@ export default function ProductDetailPage() {
     })
     refetchCompetitorPrices()
     queryClient.invalidateQueries({ queryKey: ['product', id] })
+    // Obnov i Vývoj cen — mohl přibýt nový záznam z nuties.cz/sk
+    queryClient.invalidateQueries({ queryKey: ['product-prices', id] })
   }
 
   const handleSaveManualPrice = async (compPriceId: string) => {

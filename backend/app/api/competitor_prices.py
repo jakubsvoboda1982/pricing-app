@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.database import get_db
 from app.models import Product, CompetitorProductPrice, CompetitorPriceHistory
+from app.models.price import Price
 from app.schemas.product import CompetitorProductPriceResponse, ProductResponse
 from app.competitor_scraper import scrape_competitor_price, update_all_competitor_prices, _currency_from_url, _market_from_url, preview_competitor_url
 from app.middleware.auth import verify_token
@@ -261,12 +262,76 @@ async def refresh_competitor_prices(
 
         await asyncio.sleep(0.5)
 
+    # ── Scrape vlastních cen produktu z nuties.cz / nuties.sk / nuties.hu ──
+    own_price_updates: list[str] = []
+    own_url = (product.url_reference or '').strip()
+    if own_url:
+        try:
+            from urllib.parse import urlparse, urlunparse
+
+            # Odvoď URL pro každý trh ze základní URL (nahrazení TLD)
+            own_market_urls: list[tuple[str, str, str]] = []  # (url, market, currency)
+            parsed = urlparse(own_url)
+            netloc = parsed.netloc.lower()
+
+            # CZ (.cz → CZK)
+            if '.cz' in netloc:
+                own_market_urls.append((own_url, 'CZ', 'CZK'))
+                # SK — nahraď doménu
+                sk_netloc = netloc.replace('.cz', '.sk')
+                sk_url = urlunparse(parsed._replace(netloc=sk_netloc))
+                own_market_urls.append((sk_url, 'SK', 'EUR'))
+            elif '.sk' in netloc:
+                own_market_urls.append((own_url, 'SK', 'EUR'))
+                cz_netloc = netloc.replace('.sk', '.cz')
+                cz_url = urlunparse(parsed._replace(netloc=cz_netloc))
+                own_market_urls.append((cz_url, 'CZ', 'CZK'))
+            else:
+                own_market_urls.append((own_url, 'CZ', 'CZK'))
+
+            for mkt_url, mkt, mkt_currency in own_market_urls:
+                try:
+                    scraped_price = await scrape_competitor_price(mkt_url)
+                    if scraped_price is None:
+                        continue
+
+                    # Načti poslední zaznamenanou cenu pro tento trh
+                    last_price = (
+                        db.query(Price)
+                        .filter(Price.product_id == product_id, Price.market == mkt)
+                        .order_by(desc(Price.changed_at))
+                        .first()
+                    )
+
+                    # Ulož nový záznam jen pokud se cena lišila nebo nebyla nastavena
+                    if last_price is None or abs(float(last_price.current_price) - float(scraped_price)) > 0.005:
+                        db.add(Price(
+                            product_id=product_id,
+                            market=mkt,
+                            currency=mkt_currency,
+                            current_price=scraped_price,
+                            old_price=last_price.current_price if last_price else None,
+                        ))
+                        db.commit()
+                        own_price_updates.append(mkt)
+                        logger.info(f"Own price updated [{mkt}] {product_id}: {scraped_price} {mkt_currency}")
+
+                    await asyncio.sleep(0.3)
+
+                except Exception as e:
+                    logger.warning(f"Own price scrape failed [{mkt}] {mkt_url}: {e}")
+
+        except Exception as e:
+            logger.error(f"Own price scraping error for product {product_id}: {e}")
+
+    own_msg = f", vlastní ceny aktualizovány: {', '.join(own_price_updates)}" if own_price_updates else ""
     return {
         "status": "success" if not errors else "partial",
         "updated": updated_count,
+        "own_prices_updated": own_price_updates,
         "errors": len(errors),
         "failed_urls": errors if errors else None,
-        "message": f"Aktualizováno {updated_count} cen" + (f", {len(errors)} chyb" if errors else "")
+        "message": f"Aktualizováno {updated_count} cen konkurence" + own_msg + (f", {len(errors)} chyb" if errors else "")
     }
 
 

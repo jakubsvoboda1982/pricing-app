@@ -545,12 +545,17 @@ async def update_all_competitor_prices() -> dict:
 
         db.commit()
 
-        message = f"Updated {total_updated} prices, {total_errors} errors"
+        # ── Scrape vlastních cen všech produktů (nuties.cz / nuties.sk) ──
+        own_updated = await _update_own_prices_all(db)
+        logger.info(f"Own product prices updated: {own_updated}")
+
+        message = f"Updated {total_updated} competitor prices, {own_updated} own prices, {total_errors} errors"
         logger.info(f"Competitor price update complete: {message}")
 
         return {
             "status": "success",
             "updated": total_updated,
+            "own_prices_updated": own_updated,
             "errors": total_errors,
             "message": message
         }
@@ -565,3 +570,81 @@ async def update_all_competitor_prices() -> dict:
         }
     finally:
         db.close()
+
+
+async def _update_own_prices_all(db: Session) -> int:
+    """
+    Scrape vlastních URL produktů (url_reference) a ulož nové záznamy do Price tabulky
+    pokud se cena změnila. Volá se z nočního scheduleru i z manuálního refresh endpointu.
+    """
+    from urllib.parse import urlparse, urlunparse
+    from app.models.price import Price
+    from sqlalchemy import desc as _desc
+
+    try:
+        from app.models.product import Product as ProductModel
+        products = db.query(ProductModel).filter(
+            ProductModel.url_reference != None,
+            ProductModel.url_reference != '',
+        ).all()
+    except Exception as e:
+        logger.error(f"Own price scraping: could not load products: {e}")
+        return 0
+
+    total_own = 0
+
+    for product in products:
+        own_url = (product.url_reference or '').strip()
+        if not own_url:
+            continue
+
+        try:
+            parsed = urlparse(own_url)
+            netloc = parsed.netloc.lower()
+
+            market_urls: list[tuple[str, str, str]] = []
+            if '.cz' in netloc:
+                market_urls.append((own_url, 'CZ', 'CZK'))
+                sk_url = urlunparse(parsed._replace(netloc=netloc.replace('.cz', '.sk')))
+                market_urls.append((sk_url, 'SK', 'EUR'))
+            elif '.sk' in netloc:
+                market_urls.append((own_url, 'SK', 'EUR'))
+                cz_url = urlunparse(parsed._replace(netloc=netloc.replace('.sk', '.cz')))
+                market_urls.append((cz_url, 'CZ', 'CZK'))
+            else:
+                market_urls.append((own_url, 'CZ', 'CZK'))
+
+            for mkt_url, mkt, mkt_currency in market_urls:
+                try:
+                    scraped_price = await scrape_competitor_price(mkt_url)
+                    if scraped_price is None:
+                        continue
+
+                    last_price = (
+                        db.query(Price)
+                        .filter(Price.product_id == product.id, Price.market == mkt)
+                        .order_by(_desc(Price.changed_at))
+                        .first()
+                    )
+
+                    if last_price is None or abs(float(last_price.current_price) - float(scraped_price)) > 0.005:
+                        db.add(Price(
+                            product_id=product.id,
+                            market=mkt,
+                            currency=mkt_currency,
+                            current_price=scraped_price,
+                            old_price=last_price.current_price if last_price else None,
+                        ))
+                        db.commit()
+                        total_own += 1
+                        logger.info(f"✓ Own price [{mkt}] {product.name}: {scraped_price} {mkt_currency}")
+
+                    await asyncio.sleep(0.3)
+
+                except Exception as e:
+                    logger.warning(f"Own price scrape failed [{mkt}] {mkt_url}: {e}")
+
+        except Exception as e:
+            logger.error(f"Own price error for product {product.id}: {e}")
+
+    return total_own
