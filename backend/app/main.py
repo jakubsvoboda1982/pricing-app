@@ -181,6 +181,7 @@ def _ensure_schema():
     from sqlalchemy import text
     stmts = [
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS market_names_json JSONB DEFAULT '{}'::jsonb",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS market_attributes_json JSONB DEFAULT '{}'::jsonb",
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_divisor INTEGER DEFAULT 1",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_hash VARCHAR",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_expires_at TIMESTAMP WITH TIME ZONE",

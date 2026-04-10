@@ -61,6 +61,7 @@ interface Product {
   catalog_price_vat?: number | null
   catalog_quantity_in_stock?: number | null
   market_names?: Record<string, string>
+  market_attributes?: Record<string, { description?: string; ingredients?: string }> | null
   stock_divisor?: number | null
   created_at: string
 }
@@ -494,9 +495,12 @@ export default function ProductDetailPage() {
   const [newUrlMarket, setNewUrlMarket] = useState<string>('CZ')
   const [addingUrl, setAddingUrl] = useState(false)
   const [loadingPreview, setLoadingPreview] = useState(false)
+  const [fetchingUrlData, setFetchingUrlData] = useState(false)
+  const [urlFetchResult, setUrlFetchResult] = useState<{ updated: Record<string, string | number> } | null>(null)
   const [urlPreview, setUrlPreview] = useState<{
     ok: boolean; error: string | null; detected_name: string | null
     detected_price: number | null; detected_currency: string
+    detected_description: string | null; detected_ingredients: string | null
     variants: Array<{ label: string; url: string | null; price: number | null }>
   } | null>(null)
   const [selectedVariant, setSelectedVariant] = useState<{ label: string; url: string | null; price: number | null } | null>(null)
@@ -645,7 +649,7 @@ export default function ProductDetailPage() {
       const data = await res.json()
       setUrlPreview(data)
     } catch {
-      setUrlPreview({ ok: false, error: 'Nepodařilo se načíst stránku.', detected_name: null, detected_price: null, detected_currency: 'CZK', variants: [] })
+      setUrlPreview({ ok: false, error: 'Nepodařilo se načíst stránku.', detected_name: null, detected_price: null, detected_currency: 'CZK', detected_description: null, detected_ingredients: null, variants: [] })
     } finally { setLoadingPreview(false) }
   }
 
@@ -653,6 +657,7 @@ export default function ProductDetailPage() {
     const finalUrl = selectedVariant?.url || newUrl.trim()
     if (!finalUrl) return
     setAddingUrl(true)
+    setUrlFetchResult(null)
     try {
       // 1. Add competitor URL to product (for product.competitor_urls list)
       const res1 = await authFetch(`${API_BASE_URL}/products/${id}/competitor-urls`, {
@@ -671,6 +676,23 @@ export default function ProductDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['competitor-prices', id] })
       setNewUrl(''); setShowAddUrl(false); setUrlPreview(null); setSelectedVariant(null)
       setTimeout(() => refetchCompetitorPrices(), 2000)
+
+      // 3. Automaticky stáhni info o produktu z přidané URL a ulož k produktu
+      setFetchingUrlData(true)
+      try {
+        const fetchRes = await authFetch(`${API_BASE_URL}/products/${id}/fetch-url-data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ url: finalUrl, market: newUrlMarket }),
+        })
+        if (fetchRes.ok) {
+          const fetchData = await fetchRes.json()
+          setUrlFetchResult({ updated: fetchData.updated || {} })
+          queryClient.invalidateQueries({ queryKey: ['product', id] })
+          queryClient.invalidateQueries({ queryKey: ['product-prices', id] })
+        }
+      } catch { /* ignore scrape errors */ } finally { setFetchingUrlData(false) }
+
     } catch { /* ignore */ } finally { setAddingUrl(false) }
   }
 
@@ -952,6 +974,32 @@ export default function ProductDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* ── MARKET ATTRIBUTES (popis, složení z URL) ───────────────────── */}
+      {(() => {
+        const attrs = product.market_attributes?.[activeMarket]
+        if (!attrs?.description && !attrs?.ingredients) return null
+        return (
+          <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-2">
+            {attrs.description && (
+              <div>
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
+                  Popis {MARKET_FLAG[activeMarket] ?? activeMarket}
+                </p>
+                <p className="text-sm text-gray-700 leading-relaxed">{attrs.description}</p>
+              </div>
+            )}
+            {attrs.ingredients && (
+              <div>
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
+                  Složení {MARKET_FLAG[activeMarket] ?? activeMarket}
+                </p>
+                <p className="text-sm text-gray-700 leading-relaxed">{attrs.ingredients}</p>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── MARKET SWITCHER ────────────────────────────────────────────── */}
       {availableMarkets.length > 1 && (
@@ -1436,7 +1484,7 @@ export default function ProductDetailPage() {
                     <>
                       {/* Detected product info */}
                       <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           {urlPreview.detected_name && (
                             <p className="text-sm font-medium text-gray-800 truncate">{urlPreview.detected_name}</p>
                           )}
@@ -1446,6 +1494,17 @@ export default function ProductDetailPage() {
                             </p>
                           ) : (
                             <p className="text-xs text-orange-600 mt-0.5">Cena nebyla nalezena — bude nastavena ručně</p>
+                          )}
+                          {/* Detected description */}
+                          {urlPreview.detected_description && (
+                            <p className="text-xs text-gray-500 mt-1 line-clamp-2">{urlPreview.detected_description}</p>
+                          )}
+                          {/* Detected ingredients */}
+                          {urlPreview.detected_ingredients && (
+                            <div className="mt-1 flex items-start gap-1">
+                              <span className="text-xs font-medium text-gray-400 flex-shrink-0">Složení:</span>
+                              <p className="text-xs text-gray-500 line-clamp-2">{urlPreview.detected_ingredients}</p>
+                            </div>
                           )}
                         </div>
                         <span className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5 flex-shrink-0">✓ Načteno</span>
@@ -1486,6 +1545,29 @@ export default function ProductDetailPage() {
                 </div>
               )}
 
+              {/* Fetching URL data banner */}
+              {fetchingUrlData && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+                  <svg className="animate-spin w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/>
+                  </svg>
+                  <span className="text-xs text-blue-700">Stahuji informace o produktu (cena, popis, složení)…</span>
+                </div>
+              )}
+              {urlFetchResult && !fetchingUrlData && (
+                <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+                  <p className="text-xs font-medium text-emerald-700">
+                    ✓ Uloženo: {[
+                      urlFetchResult.updated.price != null && `cena ${urlFetchResult.updated.price} ${urlFetchResult.updated.currency ?? ''}`,
+                      urlFetchResult.updated.name && 'název',
+                      urlFetchResult.updated.description && 'popis',
+                      urlFetchResult.updated.ingredients && 'složení',
+                    ].filter(Boolean).join(', ') || 'žádné nové informace'}
+                  </p>
+                </div>
+              )}
+
               {/* Actions */}
               <div className="flex gap-2">
                 {urlPreview?.ok && (
@@ -1496,7 +1578,7 @@ export default function ProductDetailPage() {
                     {addingUrl ? 'Přidávám...' : selectedVariant ? `Přidat variantu "${selectedVariant.label}"` : 'Přidat a sledovat cenu'}
                   </button>
                 )}
-                <button onClick={() => { setShowAddUrl(false); setNewUrl(''); setUrlPreview(null); setSelectedVariant(null) }}
+                <button onClick={() => { setShowAddUrl(false); setNewUrl(''); setUrlPreview(null); setSelectedVariant(null); setUrlFetchResult(null) }}
                   className="text-gray-500 px-3 py-1.5 rounded-lg text-xs hover:bg-gray-100">Zrušit</button>
               </div>
             </div>

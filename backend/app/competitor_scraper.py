@@ -294,6 +294,92 @@ def _extract_product_name(html: str) -> Optional[str]:
     return None
 
 
+def _extract_product_description(html: str) -> Optional[str]:
+    """Extrahuj popis produktu z HTML (JSON-LD → og:description → meta description)."""
+    # 1. JSON-LD description
+    for block in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                             html, re.DOTALL | re.IGNORECASE):
+        try:
+            data = json.loads(block)
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict) and '@graph' in item:
+                    items = items + item['@graph']
+                if isinstance(item, dict) and item.get('@type', '').lower() in ('product', 'productgroup'):
+                    desc = item.get('description')
+                    if desc and isinstance(desc, str) and len(desc) > 10:
+                        return desc.strip()
+        except Exception:
+            pass
+    # 2. og:description
+    for pattern in [
+        r'<meta[^>]+property=["\']og:description["\'][^>]*content=["\']([^"\']{10,2000})["\']',
+        r'<meta[^>]+content=["\']([^"\']{10,2000})["\'][^>]*property=["\']og:description["\']',
+        r'<meta[^>]+name=["\']description["\'][^>]*content=["\']([^"\']{10,2000})["\']',
+        r'<meta[^>]+content=["\']([^"\']{10,2000})["\'][^>]*name=["\']description["\']',
+    ]:
+        m = re.search(pattern, html, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def _extract_product_ingredients(html: str) -> Optional[str]:
+    """
+    Extrahuj složení/ingredience z produktové stránky.
+    Hledá sekce s názvy: Složení, Ingredients, Zloženie, Összetevők, apod.
+    """
+    # Čisti HTML od tagů pro textové hledání
+    def strip_tags(s: str) -> str:
+        return re.sub(r'<[^>]+>', ' ', s)
+
+    # Vzory pro nadpis sekce složení
+    _HEADING_PATTERNS = [
+        r'(?:Složení|Zloženie|Ingredients?|Összetev[őok]+|Inhaltsstoffe|Ingredienti)',
+    ]
+    heading_re = re.compile(
+        r'(?:' + '|'.join(_HEADING_PATTERNS) + r')\s*[:\-–]?\s*',
+        re.IGNORECASE
+    )
+
+    # 1. JSON-LD additionalProperty nebo description obsahující "složení"
+    for block in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                             html, re.DOTALL | re.IGNORECASE):
+        try:
+            data = json.loads(block)
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict) and '@graph' in item:
+                    items = items + item['@graph']
+                if isinstance(item, dict) and item.get('@type', '').lower() in ('product', 'productgroup'):
+                    for prop in item.get('additionalProperty', []):
+                        if isinstance(prop, dict):
+                            pname = str(prop.get('name', '')).lower()
+                            if any(k in pname for k in ['složen', 'ingredient', 'zložen', 'összetev']):
+                                val = prop.get('value', '')
+                                if val and len(str(val)) > 5:
+                                    return str(val).strip()
+        except Exception:
+            pass
+
+    # 2. Hledej v HTML sekci se složením
+    # Najdi oblast okolo nadpisu "Složení" a vytáhni text
+    for m in re.finditer(
+        r'(?:Složení|Zloženie|Ingredients?|Összetev[őok]+)\s*[:\-–]?\s*(?:<[^>]+>)?\s*([^<]{20,1000})',
+        html, re.IGNORECASE
+    ):
+        text = m.group(1).strip()
+        if len(text) > 15:
+            return text
+
+    # 3. Hledej v datových atributech
+    m = re.search(r'data-(?:ingredients?|slozeni|ingrediencie)["\']?\s*[:=]\s*["\']([^"\']{10,1000})', html, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+
+    return None
+
+
 def _detect_variants(html: str) -> list[dict]:
     """
     Detekuj varianty produktu z HTML.
@@ -402,6 +488,8 @@ async def preview_competitor_url(url: str) -> dict:
     price = extract_price(html, url)
     variants = _detect_variants(html)
     currency = _currency_from_url(url)
+    description = _extract_product_description(html)
+    ingredients = _extract_product_ingredients(html)
 
     return {
         "ok": True,
@@ -409,6 +497,8 @@ async def preview_competitor_url(url: str) -> dict:
         "detected_name": name,
         "detected_price": float(price) if price else None,
         "detected_currency": currency,
+        "detected_description": description,
+        "detected_ingredients": ingredients,
         "variants": variants,
     }
 

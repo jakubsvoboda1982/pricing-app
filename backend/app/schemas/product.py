@@ -99,6 +99,8 @@ class ProductResponse(BaseModel):
     catalog_quantity_in_stock: Optional[int] = None  # Sklad z katalogu (XML feedu)
     # Názvy produktu z XML feedů v jiných trzích: {"SK": "Kešu ořechy 1kg SK", "HU": "..."}
     market_names: Optional[Dict[str, Any]] = None
+    # Per-market atributy stažené z URL: {"SK": {"description": "...", "ingredients": "..."}, ...}
+    market_attributes: Optional[Dict[str, Any]] = None
     stock_divisor: Optional[int] = 1
     prices_by_market: Optional[Dict[str, Any]] = None  # {CZ: {price, currency}, SK: {price, currency}}
     manufacturing_cost_with_vat: Optional[Decimal] = None

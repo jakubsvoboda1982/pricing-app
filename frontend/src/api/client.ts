@@ -127,9 +127,19 @@ export class APIClient {
     detected_name: string | null
     detected_price: number | null
     detected_currency: string
+    detected_description: string | null
+    detected_ingredients: string | null
     variants: Array<{ label: string; url: string | null; price: number | null }>
   }> {
     return this.request('POST', '/competitor-prices/preview', { url })
+  }
+
+  async fetchProductUrlData(productId: string, url: string, market: string): Promise<{
+    ok: boolean
+    updated: Record<string, string | number>
+    product: any
+  }> {
+    return this.request('POST', `/products/${productId}/fetch-url-data`, { url, market })
   }
 
   async trackCompetitorUrl(productId: string, url: string, variantLabel?: string) {

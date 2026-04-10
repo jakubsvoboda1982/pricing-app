@@ -322,6 +322,7 @@ def _enrich_with_price(
         'catalog_price_vat': catalog_price_vat,
         'catalog_quantity_in_stock': catalog_quantity_in_stock,
         'market_names': getattr(product, 'market_names_json', None) or {},
+        'market_attributes': getattr(product, 'market_attributes_json', None) or {},
         'stock_divisor': getattr(product, 'stock_divisor', None) or 1,
         'prices_by_market': _prices_by_market or {},
         'manufacturing_cost_with_vat': manufacturing_cost_with_vat,
@@ -972,3 +973,97 @@ def remove_competitor_url(
     db.commit()
     db.refresh(product)
     return ProductResponse(**_enrich_with_price(product, db, _prices_by_market=_load_prices_by_market(db, product.id)))
+
+
+class FetchUrlDataIn(BaseModel):
+    url: str
+    market: str = "CZ"
+
+
+@router.post("/{product_id}/fetch-url-data")
+async def fetch_url_data(
+    product_id: UUID,
+    payload: FetchUrlDataIn,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Scrape produktové URL a ulož stažená data k produktu:
+    - název produktu (market_names_json[market])
+    - popis (market_attributes_json[market]["description"])
+    - složení (market_attributes_json[market]["ingredients"])
+    - aktuální cena (Price záznam pro daný trh)
+    """
+    from app.competitor_scraper import preview_competitor_url
+    from app.models.price import Price
+    from sqlalchemy import desc as _desc
+    from datetime import datetime as _dt
+
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Produkt nenalezen")
+
+    url = payload.url.strip()
+    market = payload.market.upper()
+
+    # Odvoď měnu z trhu
+    _MARKET_CURRENCY = {'CZ': 'CZK', 'SK': 'EUR', 'HU': 'HUF'}
+    currency = _MARKET_CURRENCY.get(market, 'CZK')
+
+    # Scrape URL
+    result = await preview_competitor_url(url)
+
+    updated: dict = {}
+
+    # 1. Název pro daný trh
+    if result.get('detected_name'):
+        names = dict(product.market_names_json or {})
+        names[market] = result['detected_name']
+        product.market_names_json = names
+        updated['name'] = result['detected_name']
+
+    # 2. Per-market atributy (popis, složení)
+    attrs = dict(product.market_attributes_json or {})
+    market_attrs = dict(attrs.get(market, {}))
+    changed_attrs = False
+    if result.get('detected_description'):
+        market_attrs['description'] = result['detected_description']
+        changed_attrs = True
+        updated['description'] = result['detected_description']
+    if result.get('detected_ingredients'):
+        market_attrs['ingredients'] = result['detected_ingredients']
+        changed_attrs = True
+        updated['ingredients'] = result['detected_ingredients']
+    if changed_attrs:
+        attrs[market] = market_attrs
+        product.market_attributes_json = attrs
+
+    # 3. Ulož cenu, pokud byla detekována
+    if result.get('detected_price'):
+        scraped_price = Decimal(str(result['detected_price']))
+        last_price = (
+            db.query(Price)
+            .filter(Price.product_id == product.id, Price.market == market)
+            .order_by(_desc(Price.changed_at))
+            .first()
+        )
+        if last_price is None or abs(float(last_price.current_price) - float(scraped_price)) > 0.005:
+            db.add(Price(
+                product_id=product.id,
+                market=market,
+                currency=currency,
+                current_price=scraped_price,
+                old_price=last_price.current_price if last_price else None,
+            ))
+            updated['price'] = float(scraped_price)
+            updated['currency'] = currency
+
+    db.commit()
+    db.refresh(product)
+
+    return {
+        "ok": result.get('ok', False),
+        "updated": updated,
+        "product": ProductResponse(**_enrich_with_price(product, db,
+            _prices_by_market=_load_prices_by_market(db, product.id))),
+    }
