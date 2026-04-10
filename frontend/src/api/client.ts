@@ -142,6 +142,10 @@ export class APIClient {
     return this.request('POST', `/products/${productId}/fetch-url-data`, { url, market })
   }
 
+  async setOwnMarketUrl(productId: string, market: string, url: string) {
+    return this.request('PUT', `/products/${productId}/own-market-url`, { market, url })
+  }
+
   async trackCompetitorUrl(productId: string, url: string, variantLabel?: string) {
     return this.request('POST', `/competitor-prices/${productId}/track`, { url, variant_label: variantLabel ?? null })
   }

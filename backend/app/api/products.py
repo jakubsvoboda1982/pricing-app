@@ -323,6 +323,7 @@ def _enrich_with_price(
         'catalog_quantity_in_stock': catalog_quantity_in_stock,
         'market_names': getattr(product, 'market_names_json', None) or {},
         'market_attributes': getattr(product, 'market_attributes_json', None) or {},
+        'own_market_urls': getattr(product, 'own_market_urls_json', None) or {},
         'stock_divisor': getattr(product, 'stock_divisor', None) or 1,
         'prices_by_market': _prices_by_market or {},
         'manufacturing_cost_with_vat': manufacturing_cost_with_vat,
@@ -1067,3 +1068,51 @@ async def fetch_url_data(
         "product": ProductResponse(**_enrich_with_price(product, db,
             _prices_by_market=_load_prices_by_market(db, product.id))),
     }
+
+
+class OwnMarketUrlIn(BaseModel):
+    market: str
+    url: str  # empty string = clear the URL
+
+
+@router.put("/{product_id}/own-market-url")
+async def set_own_market_url(
+    product_id: UUID,
+    payload: OwnMarketUrlIn,
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Nastav nebo smaž vlastní URL produktu pro daný trh.
+    Pokud je url prázdný string, URL pro daný trh se odstraní.
+    Vždy synchronizuje own_market_urls_json s url_reference (CZ trh).
+    """
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Produkt nenalezen")
+
+    market = payload.market.upper()
+    url = payload.url.strip()
+
+    urls = dict(product.own_market_urls_json or {})
+    if url:
+        urls[market] = url
+    else:
+        urls.pop(market, None)
+
+    product.own_market_urls_json = urls
+
+    # Synchronizuj url_reference s CZ URL (nebo první dostupnou)
+    if market == 'CZ':
+        product.url_reference = url or None
+    elif 'CZ' in urls:
+        product.url_reference = urls['CZ']
+    elif urls:
+        product.url_reference = next(iter(urls.values()))
+    else:
+        product.url_reference = None
+
+    db.commit()
+    db.refresh(product)
+    return ProductResponse(**_enrich_with_price(product, db,
+        _prices_by_market=_load_prices_by_market(db, product.id)))

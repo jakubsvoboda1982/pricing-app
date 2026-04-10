@@ -52,6 +52,9 @@ class Product(Base):
     # Per-market atributy stažené z produktové URL: {"SK": {"description": "...", "ingredients": "..."}, ...}
     market_attributes_json = Column(JSONB, default=dict, nullable=True)
 
+    # Per-market vlastní URL: {"CZ": "https://nuties.cz/...", "SK": "https://nuties.sk/...", "HU": "https://nuties.hu/..."}
+    own_market_urls_json = Column(JSONB, default=dict, nullable=True)
+
     # Koeficient pro přepočet skladovosti (např. 2 = zobrazit polovinu)
     stock_divisor = Column(Integer, nullable=True, default=1)
 

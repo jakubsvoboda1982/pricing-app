@@ -62,6 +62,8 @@ interface Product {
   catalog_quantity_in_stock?: number | null
   market_names?: Record<string, string>
   market_attributes?: Record<string, { description?: string; ingredients?: string }> | null
+  own_market_urls?: Record<string, string> | null
+  prices_by_market?: Record<string, { price: number | null; old_price?: number | null; currency: string }> | null
   stock_divisor?: number | null
   created_at: string
 }
@@ -515,6 +517,9 @@ export default function ProductDetailPage() {
   const [editingDivisor, setEditingDivisor] = useState(false)
   const [divisorInput, setDivisorInput] = useState('1')
   const [savingDivisor, setSavingDivisor] = useState(false)
+  const [ownUrlEditing, setOwnUrlEditing] = useState<Record<string, string>>({})
+  const [ownUrlSaving, setOwnUrlSaving] = useState<Record<string, boolean>>({})
+  const [ownUrlFetchStatus, setOwnUrlFetchStatus] = useState<Record<string, 'idle' | 'fetching' | 'done' | 'error'>>({})
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
@@ -716,6 +721,43 @@ export default function ProductDetailPage() {
       const cost = parseFloat(pricingForm.manufacturing_cost.replace(',', '.'))
       if (isNaN(cost) || cost <= 0) return
       setPricingMutation.mutate({ manufacturing_cost: cost, purchase_vat_rate: pvr, min_price: cost * (1 + pvr / 100) })
+    }
+  }
+
+  const handleSaveOwnUrl = async (market: string) => {
+    const url = (ownUrlEditing[market] ?? '').trim()
+    setOwnUrlSaving(s => ({ ...s, [market]: true }))
+    try {
+      // 1. Save URL
+      await authFetch(`${API_BASE_URL}/products/${id}/own-market-url`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ market, url }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['product', id] })
+
+      // 2. If URL set, auto-fetch product info
+      if (url) {
+        setOwnUrlFetchStatus(s => ({ ...s, [market]: 'fetching' }))
+        try {
+          const res = await authFetch(`${API_BASE_URL}/products/${id}/fetch-url-data`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ url, market }),
+          })
+          if (res.ok) {
+            setOwnUrlFetchStatus(s => ({ ...s, [market]: 'done' }))
+            queryClient.invalidateQueries({ queryKey: ['product', id] })
+            queryClient.invalidateQueries({ queryKey: ['product-prices', id] })
+          } else {
+            setOwnUrlFetchStatus(s => ({ ...s, [market]: 'error' }))
+          }
+        } catch {
+          setOwnUrlFetchStatus(s => ({ ...s, [market]: 'error' }))
+        }
+      }
+    } catch { /* ignore */ } finally {
+      setOwnUrlSaving(s => ({ ...s, [market]: false }))
     }
   }
 
@@ -1230,6 +1272,101 @@ export default function ProductDetailPage() {
           </div>
         </div>
       )}
+
+      {/* ── VLASTNÍ URL TRHU ──────────────────────────────────────────── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Vlastní URL trhu</p>
+          <p className="text-xs text-gray-400">Cena, popis a složení se stáhne automaticky</p>
+        </div>
+        <div className="space-y-2">
+          {(['CZ', 'SK', 'HU'] as const).map(mkt => {
+            const flag = MARKET_FLAG[mkt] ?? mkt
+            const savedUrl = product.own_market_urls?.[mkt] ?? ''
+            const editVal = ownUrlEditing[mkt] ?? savedUrl
+            const isSaving = ownUrlSaving[mkt] ?? false
+            const fetchStatus = ownUrlFetchStatus[mkt] ?? 'idle'
+            const isDirty = editVal !== savedUrl
+            const mktAttrs = product.market_attributes?.[mkt]
+            const mktPrice = product.prices_by_market?.[mkt]
+
+            return (
+              <div key={mkt} className={`rounded-lg border px-3 py-2.5 transition ${activeMarket === mkt ? 'border-blue-200 bg-blue-50/40' : 'border-gray-100 bg-gray-50'}`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-base flex-shrink-0">{flag}</span>
+                  <span className="text-xs font-medium text-gray-500 w-6">{mkt}</span>
+                  <input
+                    type="url"
+                    value={editVal}
+                    onChange={e => setOwnUrlEditing(s => ({ ...s, [mkt]: e.target.value }))}
+                    onBlur={() => { if (!isDirty) setOwnUrlEditing(s => { const n = { ...s }; delete n[mkt]; return n }) }}
+                    placeholder={`https://nuties.${mkt.toLowerCase()}/ ...`}
+                    className="flex-1 min-w-0 text-xs font-mono bg-white border border-gray-200 rounded px-2 py-1.5 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 text-gray-700 placeholder-gray-300"
+                  />
+                  {isDirty ? (
+                    <button
+                      onClick={() => handleSaveOwnUrl(mkt)}
+                      disabled={isSaving}
+                      className="flex-shrink-0 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-3 py-1.5 rounded text-xs font-medium transition">
+                      {isSaving ? '…' : 'Uložit'}
+                    </button>
+                  ) : savedUrl ? (
+                    <button
+                      onClick={() => {
+                        setOwnUrlFetchStatus(s => ({ ...s, [mkt]: 'fetching' }))
+                        authFetch(`${API_BASE_URL}/products/${id}/fetch-url-data`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                          body: JSON.stringify({ url: savedUrl, market: mkt }),
+                        }).then(r => {
+                          setOwnUrlFetchStatus(s => ({ ...s, [mkt]: r.ok ? 'done' : 'error' }))
+                          if (r.ok) {
+                            queryClient.invalidateQueries({ queryKey: ['product', id] })
+                            queryClient.invalidateQueries({ queryKey: ['product-prices', id] })
+                          }
+                        }).catch(() => setOwnUrlFetchStatus(s => ({ ...s, [mkt]: 'error' })))
+                      }}
+                      disabled={fetchStatus === 'fetching'}
+                      className="flex-shrink-0 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 hover:border-blue-300 px-2 py-1.5 rounded bg-white transition"
+                      title="Aktualizovat cenu a info z URL">
+                      {fetchStatus === 'fetching' ? (
+                        <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/></svg>
+                      ) : '↻'}
+                    </button>
+                  ) : null}
+                </div>
+
+                {/* Status row */}
+                {savedUrl && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-14">
+                    {mktPrice?.price != null && (
+                      <span className="text-xs text-emerald-700 font-semibold">
+                        {mktPrice.price.toLocaleString('cs-CZ')} {mktPrice.currency}
+                      </span>
+                    )}
+                    {mktAttrs?.description && (
+                      <span className="text-xs text-gray-400">✓ popis</span>
+                    )}
+                    {mktAttrs?.ingredients && (
+                      <span className="text-xs text-gray-400">✓ složení</span>
+                    )}
+                    {fetchStatus === 'done' && (
+                      <span className="text-xs text-emerald-600">✓ aktualizováno</span>
+                    )}
+                    {fetchStatus === 'error' && (
+                      <span className="text-xs text-red-500">⚠ chyba při stahování</span>
+                    )}
+                    <a href={savedUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-xs text-blue-500 hover:underline truncate max-w-xs">
+                      {savedUrl.replace(/^https?:\/\/(www\.)?/, '').slice(0, 50)}
+                    </a>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
 
       {/* ── MAIN GRID: Cenotvorba + Konkurenti ─────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">

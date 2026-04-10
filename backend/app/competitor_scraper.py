@@ -685,24 +685,35 @@ async def _update_own_prices_all(db: Session) -> int:
 
     for product in products:
         own_url = (product.url_reference or '').strip()
-        if not own_url:
+        own_market_urls = dict(getattr(product, 'own_market_urls_json', None) or {})
+
+        if not own_market_urls and not own_url:
             continue
 
         try:
-            parsed = urlparse(own_url)
-            netloc = parsed.netloc.lower()
-
             market_urls: list[tuple[str, str, str]] = []
-            if '.cz' in netloc:
-                market_urls.append((own_url, 'CZ', 'CZK'))
-                sk_url = urlunparse(parsed._replace(netloc=netloc.replace('.cz', '.sk')))
-                market_urls.append((sk_url, 'SK', 'EUR'))
-            elif '.sk' in netloc:
-                market_urls.append((own_url, 'SK', 'EUR'))
-                cz_url = urlunparse(parsed._replace(netloc=netloc.replace('.sk', '.cz')))
-                market_urls.append((cz_url, 'CZ', 'CZK'))
-            else:
-                market_urls.append((own_url, 'CZ', 'CZK'))
+            _MARKET_CURRENCY_MAP = {'CZ': 'CZK', 'SK': 'EUR', 'HU': 'HUF'}
+
+            if own_market_urls:
+                # Use explicit per-market URLs
+                for mkt, mkt_url in own_market_urls.items():
+                    if mkt_url and mkt_url.strip():
+                        mkt_currency = _MARKET_CURRENCY_MAP.get(mkt.upper(), 'CZK')
+                        market_urls.append((mkt_url.strip(), mkt.upper(), mkt_currency))
+            elif own_url:
+                # Fallback: auto-derive from url_reference
+                parsed = urlparse(own_url)
+                netloc = parsed.netloc.lower()
+                if '.cz' in netloc:
+                    market_urls.append((own_url, 'CZ', 'CZK'))
+                    sk_url = urlunparse(parsed._replace(netloc=netloc.replace('.cz', '.sk')))
+                    market_urls.append((sk_url, 'SK', 'EUR'))
+                elif '.sk' in netloc:
+                    market_urls.append((own_url, 'SK', 'EUR'))
+                    cz_url = urlunparse(parsed._replace(netloc=netloc.replace('.sk', '.cz')))
+                    market_urls.append((cz_url, 'CZ', 'CZK'))
+                else:
+                    market_urls.append((own_url, 'CZ', 'CZK'))
 
             for mkt_url, mkt, mkt_currency in market_urls:
                 try:
