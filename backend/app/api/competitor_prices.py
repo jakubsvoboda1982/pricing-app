@@ -492,10 +492,32 @@ async def trigger_update_all_competitor_prices(background_tasks: BackgroundTasks
     Manually trigger update of all competitor prices across all products.
     Runs asynchronously in background.
     """
-    # Schedule the update to run in background
     background_tasks.add_task(update_all_competitor_prices)
-
     return {
         "status": "scheduled",
         "message": "Aktualizace všech cen konkurence byla naplánována"
     }
+
+
+@router.post("/refresh-all-now")
+async def refresh_all_products_now(
+    payload: dict = Depends(verify_token),
+):
+    """
+    Synchronně aktualizuje ceny konkurentů + vlastní ceny (nuties.cz/sk)
+    pro všechny produkty. Volá se z tlačítka 'Aktualizovat vše' v přehledu.
+    Nejprve osvěží kurzy ČNB, pak spustí scraping.
+    """
+    # Obnov kurzy ČNB před scrapingem
+    try:
+        from app.utils.exchange_rates import _fetch_cnb_rates, _cache
+        from datetime import datetime as _dt
+        fresh = await _fetch_cnb_rates()
+        if fresh:
+            _cache['rates'] = fresh
+            _cache['fetched_at'] = _dt.utcnow()
+    except Exception:
+        pass
+
+    result = await update_all_competitor_prices()
+    return result

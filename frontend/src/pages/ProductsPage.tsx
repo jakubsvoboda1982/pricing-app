@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Search, Plus, Link2, Upload, Trash2, ExternalLink, Package, AlertCircle, X, RefreshCw, CheckCircle, Globe, Play, ChevronDown } from 'lucide-react'
-import { apiClient } from '@/api/client'
+import { apiClient, API_BASE_URL, authFetch } from '@/api/client'
 import { useNavigate } from 'react-router-dom'
 import { useMarketStore, shouldShowMarket } from '@/store/market'
 import { useDisplayStore } from '@/store/display'
@@ -47,6 +47,7 @@ export default function ProductsPage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [linkResult, setLinkResult] = useState<LinkResult | null>(null)
   const [linkLoading, setLinkLoading] = useState(false)
+  const [refreshingAll, setRefreshingAll] = useState(false)
   // Bulk competitor panel
   const [bulkPanel, setBulkPanel] = useState<'competitor' | 'pipeline' | null>(null)
   const [bulkCompetitorId, setBulkCompetitorId] = useState('')
@@ -104,6 +105,19 @@ export default function ProductsPage() {
       setLinkResult({ linked: 0, already_linked: 0, not_found: 0, details: [], not_found_list: [] })
     } finally {
       setLinkLoading(false)
+    }
+  }
+
+  const handleRefreshAll = async () => {
+    setRefreshingAll(true)
+    try {
+      await authFetch(`${API_BASE_URL}/competitor-prices/refresh-all-now`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
+      })
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    } finally {
+      setRefreshingAll(false)
     }
   }
 
@@ -203,6 +217,14 @@ export default function ProductsPage() {
           <p className="text-sm text-gray-400 mt-0.5">Produkty s aktuálními cenami a doporučeními.</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefreshAll}
+            disabled={refreshingAll}
+            title="Aktualizuje ceny konkurentů + vlastní ceny na nuties.cz/sk pro všechny produkty"
+            className="flex items-center gap-1.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-60 disabled:cursor-wait">
+            <RefreshCw size={14} className={refreshingAll ? 'animate-spin' : ''} />
+            {refreshingAll ? 'Aktualizuji…' : 'Aktualizovat vše'}
+          </button>
           <button
             onClick={() => handleBulkLink()}
             disabled={linkLoading}

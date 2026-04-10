@@ -152,7 +152,8 @@ def _enrich_with_price(
 
     # ── Kurzy pro přepočet nákupní ceny do měny daného trhu ──────────────────
     # Nákupní/výrobní cena je vždy v CZK. Pro SK/HU produkty přepočítáme dle kurzu.
-    EXCHANGE_CZK = {'CZK': Decimal('1'), 'EUR': Decimal('24.5'), 'HUF': Decimal('0.0655')}
+    from app.utils.exchange_rates import get_exchange_rates_sync
+    EXCHANGE_CZK = get_exchange_rates_sync()   # z CNB cache, fallback na pevné kurzy
     price_market = price.market if price else 'CZ'
     price_currency = price.currency if price else 'CZK'
 
@@ -161,6 +162,8 @@ def _enrich_with_price(
         if not sell_price or not cost_with_vat or sell_price <= 0:
             return None
         rate = EXCHANGE_CZK.get(currency, Decimal('1'))
+        if not rate or rate == 0:
+            return None
         cost_in_currency = round(cost_with_vat / rate, 4)
         m = (Decimal(str(sell_price)) - cost_in_currency) / Decimal(str(sell_price)) * Decimal('100')
         return round(m, 2)

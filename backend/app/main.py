@@ -129,6 +129,21 @@ async def lifespan(app: FastAPI):
     print("[Scheduler] Denní načítání feedů aktivováno (02:00 UTC)")
     print("[Scheduler] Denní aktualizace cen konkurence aktivována (03:00 UTC)")
     print("[Scheduler] Denní synchronizace Baselinker skladů aktivována (04:00 UTC)")
+
+    # Načti kurzy ČNB při startu (uloží do cache)
+    try:
+        from app.utils.exchange_rates import _fetch_cnb_rates, _cache
+        from datetime import datetime as _dt
+        _rates = await _fetch_cnb_rates()
+        if _rates:
+            _cache['rates'] = _rates
+            _cache['fetched_at'] = _dt.utcnow()
+            print(f"[Startup] Kurzy ČNB načteny: EUR={_rates.get('EUR')}, HUF={_rates.get('HUF')}")
+        else:
+            print("[Startup] Kurzy ČNB nelze načíst, použiji záložní hodnoty")
+    except Exception as _e:
+        print(f"[Startup] Chyba při načítání kurzů ČNB: {_e}")
+
     yield
     # Shutdown
     scheduler.shutdown()
