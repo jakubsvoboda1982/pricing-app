@@ -14,6 +14,7 @@ interface Product {
   category?: string; thumbnail_url?: string; current_price?: number | null
   purchase_price_without_vat?: number | null; purchase_vat_rate?: number | null
   purchase_price_with_vat?: number | null; margin?: number | null
+  margin_by_market?: Record<string, number> | null
   hero_score?: number | null; lowest_competitor_price?: number | null
   market?: string; currency?: string
   competitor_urls?: { url: string; name: string; market: string }[]
@@ -57,14 +58,27 @@ export default function DashboardPage() {
     },
   })
 
+  // ── Helper: správná marže dle trhu ────────────────────────────────────────
+  // Preferuj margin_by_market[CZ], pak první dostupný trh, pak globální margin
+  function getProductMargin(p: Product, market?: string): number | null {
+    const mbm = p.margin_by_market
+    if (mbm) {
+      const key = market ?? 'CZ'
+      if (mbm[key] != null) return mbm[key]
+      const keys = Object.keys(mbm)
+      if (keys.length > 0) return mbm[keys[0]]
+    }
+    return p.margin != null ? Number(p.margin) : null
+  }
+
   // ── Metrics ────────────────────────────────────────────────────────────────
   const totalProducts   = products.length
   const withPrice       = products.filter(p => p.current_price != null).length
-  const withMargin      = products.filter(p => p.margin != null)
-  const avgMargin       = withMargin.length ? withMargin.reduce((s, p) => s + Number(p.margin), 0) / withMargin.length : null
+  const withMargin      = products.filter(p => getProductMargin(p) != null)
+  const avgMargin       = withMargin.length ? withMargin.reduce((s, p) => s + (getProductMargin(p) ?? 0), 0) / withMargin.length : null
   const withHero        = products.filter(p => p.hero_score != null)
   const avgHero         = withHero.length ? Math.round(withHero.reduce((s, p) => s + Number(p.hero_score), 0) / withHero.length) : null
-  const lowMarginCount  = withMargin.filter(p => Number(p.margin) < 10).length
+  const lowMarginCount  = withMargin.filter(p => (getProductMargin(p) ?? 0) < 10).length
   const noCompetitor    = products.filter(p => !p.competitor_urls || p.competitor_urls.length === 0).length
   const noPriceCount    = products.filter(p => p.current_price == null).length
   const lowStockCount   = products.filter(p => {
@@ -91,7 +105,8 @@ export default function DashboardPage() {
     const cat = p.category?.split('|').pop()?.trim() || 'Ostatní'
     if (!catMap[cat]) catMap[cat] = { count: 0, margins: [] }
     catMap[cat].count++
-    if (p.margin != null) catMap[cat].margins.push(Number(p.margin))
+    const m = getProductMargin(p)
+    if (m != null) catMap[cat].margins.push(m)
   })
   const categories = Object.entries(catMap)
     .map(([name, d]) => ({ name, count: d.count, avgMargin: d.margins.length ? d.margins.reduce((a, b) => a + b) / d.margins.length : null }))
@@ -358,16 +373,19 @@ export default function DashboardPage() {
                   </div>
                 )
 
-                // Margin cell (shared)
+                // Margin cell (shared) — použij margin_by_market dle aktivního trhu
+                const activeMarginMarket = viewMode === 'tabs' && dashMarket !== 'ALL' ? dashMarket : undefined
+                const displayMargin = getProductMargin(p, activeMarginMarket)
                 const marginCell = (
                   <div className="text-right w-16">
-                    {p.margin != null ? (
+                    {displayMargin != null ? (
                       <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
-                        Number(p.margin) >= 20 ? 'bg-green-100 text-green-700'
-                        : Number(p.margin) >= 10 ? 'bg-yellow-100 text-yellow-700'
+                        displayMargin >= 20 ? 'bg-green-100 text-green-700'
+                        : displayMargin >= 10 ? 'bg-yellow-100 text-yellow-700'
+                        : displayMargin > 0 ? 'bg-orange-100 text-orange-700'
                         : 'bg-red-100 text-red-700'
                       }`}>
-                        {Number(p.margin).toFixed(1)} %
+                        {displayMargin.toFixed(1)} %
                       </span>
                     ) : (
                       <span className="text-xs text-gray-300">—</span>

@@ -15,6 +15,33 @@ import re
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
+_NATIVE_CURRENCY = {'CZ': 'CZK', 'SK': 'EUR', 'HU': 'HUF'}
+
+
+def _load_prices_by_market(db: Session, product_id) -> dict:
+    """
+    Vrátí {market: {price, old_price, currency}} pro jeden produkt.
+    Pro každý trh preferuje nativní měnu (CZK pro CZ, EUR pro SK, HUF pro HU).
+    """
+    rows = (
+        db.query(Price)
+        .filter(Price.product_id == product_id)
+        .order_by(desc(Price.changed_at))
+        .all()
+    )
+    result: dict = {}
+    for row in rows:
+        mkt = row.market or 'CZ'
+        native = _NATIVE_CURRENCY.get(mkt, 'CZK')
+        currency = row.currency or 'CZK'
+        if mkt not in result or currency == native:
+            result[mkt] = {
+                'price': float(row.current_price) if row.current_price is not None else None,
+                'old_price': float(row.old_price) if row.old_price is not None else None,
+                'currency': currency,
+            }
+    return result
+
 
 class CompetitorUrlAdd(BaseModel):
     url: str
@@ -168,10 +195,7 @@ def _enrich_with_price(
         m = (Decimal(str(sell_price)) - cost_in_currency) / Decimal(str(sell_price)) * Decimal('100')
         return round(m, 2)
 
-    # Marže pro "výchozí" cenu (zpětná kompatibilita — primární záznam z Price)
-    margin = _margin_for_price(current_price, price_currency)
-
-    # Marže per trh — pro každý trh s dostupnou cenou
+    # Marže per trh — pro každý trh s dostupnou cenou (přednostně nativní měna)
     margin_by_market: dict = {}
     pbm = _prices_by_market or {}
     for mkt, mkt_data in pbm.items():
@@ -180,9 +204,18 @@ def _enrich_with_price(
         m = _margin_for_price(mkt_price, mkt_currency)
         if m is not None:
             margin_by_market[mkt] = float(m)
-    # Pokud není prices_by_market, použij primární cenu
-    if not margin_by_market and margin is not None:
-        margin_by_market[price_market] = float(margin)
+
+    # Primární marže: preferuj CZ trh, pak první dostupný, nakonec z primárního Price záznamu
+    if margin_by_market:
+        margin = Decimal(str(
+            margin_by_market.get('CZ')
+            or next(iter(margin_by_market.values()))
+        ))
+    else:
+        # Fallback: počítej z primárního Price záznamu (zpětná kompatibilita)
+        margin = _margin_for_price(current_price, price_currency)
+        if margin is not None:
+            margin_by_market[price_market] = float(margin)
 
     # ── Competitor prices ──────────────────────────────────────────────────
     lowest_competitor_price = None
@@ -349,12 +382,15 @@ def list_products(
         cats = db.query(CatalogProduct).filter(CatalogProduct.id.in_(catalog_ids)).all()
         cat_map = {str(c.id): c for c in cats}
 
-    # 4. Latest price per product per market (for multi-market view)
+    # 4. Latest price per product per market+currency (for multi-market view)
+    # We group by (product_id, market, currency) so that we get the latest record
+    # per currency. Then we prefer native currency (CZK/EUR/HUF) for each market.
     from sqlalchemy import and_
+    _NATIVE_CURRENCY = {'CZ': 'CZK', 'SK': 'EUR', 'HU': 'HUF'}
     latest_per_mkt_subq = (
-        db.query(Price.product_id, Price.market, func.max(Price.changed_at).label("max_ts"))
+        db.query(Price.product_id, Price.market, Price.currency, func.max(Price.changed_at).label("max_ts"))
         .filter(Price.product_id.in_(product_ids))
-        .group_by(Price.product_id, Price.market)
+        .group_by(Price.product_id, Price.market, Price.currency)
         .subquery()
     )
     all_mkt_prices = (
@@ -362,17 +398,24 @@ def list_products(
         .join(latest_per_mkt_subq, and_(
             Price.product_id == latest_per_mkt_subq.c.product_id,
             Price.market == latest_per_mkt_subq.c.market,
+            Price.currency == latest_per_mkt_subq.c.currency,
             Price.changed_at == latest_per_mkt_subq.c.max_ts,
         ))
         .all()
     )
     mkt_price_map: dict = defaultdict(dict)
     for mp in all_mkt_prices:
-        mkt_price_map[str(mp.product_id)][mp.market] = {
-            'price': float(mp.current_price) if mp.current_price is not None else None,
-            'old_price': float(mp.old_price) if mp.old_price is not None else None,
-            'currency': mp.currency or 'CZK',
-        }
+        pid = str(mp.product_id)
+        mkt = mp.market or 'CZ'
+        native = _NATIVE_CURRENCY.get(mkt, 'CZK')
+        currency = mp.currency or 'CZK'
+        # Prefer native currency; only overwrite with non-native if slot empty
+        if mkt not in mkt_price_map[pid] or currency == native:
+            mkt_price_map[pid][mkt] = {
+                'price': float(mp.current_price) if mp.current_price is not None else None,
+                'old_price': float(mp.old_price) if mp.old_price is not None else None,
+                'currency': currency,
+            }
 
     return [
         ProductResponse(**_enrich_with_price(
@@ -486,7 +529,8 @@ def create_product(
             db.commit()
         except Exception:
             db.rollback()
-        return ProductResponse(**_enrich_with_price(existing, db))
+        return ProductResponse(**_enrich_with_price(existing, db,
+            _prices_by_market=_load_prices_by_market(db, existing.id)))
 
     db_product = Product(
         company_id=company.id,
@@ -531,7 +575,8 @@ def create_product(
 
     db.commit()
     db.refresh(db_product)
-    return ProductResponse(**_enrich_with_price(db_product, db))
+    return ProductResponse(**_enrich_with_price(db_product, db,
+        _prices_by_market=_load_prices_by_market(db, db_product.id)))
 
 
 @router.get("/{product_id}", response_model=ProductResponse)
@@ -543,7 +588,8 @@ def get_product(
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-    return ProductResponse(**_enrich_with_price(product, db))
+    return ProductResponse(**_enrich_with_price(product, db,
+        _prices_by_market=_load_prices_by_market(db, product.id)))
 
 
 @router.put("/{product_id}", response_model=ProductResponse)
@@ -562,7 +608,8 @@ def update_product(
 
     db.commit()
     db.refresh(product)
-    return ProductResponse(**_enrich_with_price(product, db))
+    return ProductResponse(**_enrich_with_price(product, db,
+        _prices_by_market=_load_prices_by_market(db, product.id)))
 
 
 @router.patch("/{product_id}/stock-divisor")
@@ -613,7 +660,7 @@ def update_pricing(
 
     db.commit()
     db.refresh(product)
-    return ProductResponse(**_enrich_with_price(product, db))
+    return ProductResponse(**_enrich_with_price(product, db, _prices_by_market=_load_prices_by_market(db, product.id)))
 
 
 @router.post("/bulk-link-catalog")
@@ -906,7 +953,7 @@ async def add_competitor_url(
             db.commit()
 
     db.refresh(product)
-    return ProductResponse(**_enrich_with_price(product, db))
+    return ProductResponse(**_enrich_with_price(product, db, _prices_by_market=_load_prices_by_market(db, product.id)))
 
 
 @router.delete("/{product_id}/competitor-urls")
@@ -924,4 +971,4 @@ def remove_competitor_url(
     product.competitor_urls = urls
     db.commit()
     db.refresh(product)
-    return ProductResponse(**_enrich_with_price(product, db))
+    return ProductResponse(**_enrich_with_price(product, db, _prices_by_market=_load_prices_by_market(db, product.id)))
