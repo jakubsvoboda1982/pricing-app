@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ExternalLink, RefreshCw, Edit2, Save, X, Globe, Mail, Phone, MapPin, CheckCircle, AlertCircle } from 'lucide-react'
+import { ArrowLeft, ExternalLink, RefreshCw, Edit2, Save, X, Globe, Mail, Phone, MapPin, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import { API_BASE_URL, authFetch } from '@/api/client'
 
 interface CompetitorDetail {
@@ -50,6 +50,7 @@ export default function CompetitorDetailPage() {
   const queryClient = useQueryClient()
   const [isEditing, setIsEditing] = useState(false)
   const [editForm, setEditForm] = useState<Partial<CompetitorDetail>>({})
+  const [autoFetched, setAutoFetched] = useState(false)
 
   const { data: competitor, isLoading, error } = useQuery({
     queryKey: ['competitor', id],
@@ -98,6 +99,17 @@ export default function CompetitorDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['competitors'] })
     },
   })
+
+  // Auto-trigger rescrape při prvním načtení pokud chybí data
+  useEffect(() => {
+    if (!competitor || autoFetched || rescrapeMutation.isPending) return
+    const missingData = !competitor.description && !competitor.email && !competitor.phone
+    const neverScraped = !competitor.last_scrape_date
+    if (missingData || neverScraped) {
+      setAutoFetched(true)
+      rescrapeMutation.mutate()
+    }
+  }, [competitor])
 
   const handleEditStart = () => {
     if (!competitor) return
@@ -194,12 +206,15 @@ export default function CompetitorDetailPage() {
 
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => rescrapeMutation.mutate()}
+              onClick={() => { setAutoFetched(true); rescrapeMutation.mutate() }}
               disabled={rescrapeMutation.isPending}
               className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm text-gray-700 transition disabled:opacity-50"
               title="Načíst informace z webu"
             >
-              <RefreshCw size={16} className={rescrapeMutation.isPending ? 'animate-spin' : ''} />
+              {rescrapeMutation.isPending
+                ? <Loader2 size={16} className="animate-spin" />
+                : <RefreshCw size={16} />
+              }
               <span>{rescrapeMutation.isPending ? 'Načítám...' : 'Načíst info z webu'}</span>
             </button>
             {!isEditing ? (
@@ -250,9 +265,20 @@ export default function CompetitorDetailPage() {
         </div>
       )}
 
+      {rescrapeMutation.isPending && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin flex-shrink-0" />
+          Načítám informace z webu konkurenta…
+        </div>
+      )}
       {rescrapeMutation.isSuccess && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700">
           ✓ Informace byly úspěšně aktualizovány z webu
+        </div>
+      )}
+      {rescrapeMutation.isError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+          ✗ Nepodařilo se načíst informace z webu. Zkus to znovu ručně.
         </div>
       )}
 
