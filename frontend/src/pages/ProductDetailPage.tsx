@@ -498,8 +498,6 @@ export default function ProductDetailPage() {
   const [newUrlMarket, setNewUrlMarket] = useState<string>('CZ')
   const [addingUrl, setAddingUrl] = useState(false)
   const [loadingPreview, setLoadingPreview] = useState(false)
-  const [fetchingUrlData, setFetchingUrlData] = useState(false)
-  const [urlFetchResult, setUrlFetchResult] = useState<{ updated: Record<string, string | number> } | null>(null)
   const [urlPreview, setUrlPreview] = useState<{
     ok: boolean; error: string | null; detected_name: string | null
     detected_price: number | null; detected_currency: string
@@ -670,7 +668,6 @@ export default function ProductDetailPage() {
     const finalUrl = selectedVariant?.url || newUrl.trim()
     if (!finalUrl) return
     setAddingUrl(true)
-    setUrlFetchResult(null)
     try {
       // 1. Add competitor URL to product (for product.competitor_urls list)
       const res1 = await authFetch(`${API_BASE_URL}/products/${id}/competitor-urls`, {
@@ -689,22 +686,9 @@ export default function ProductDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['competitor-prices', id] })
       setNewUrl(''); setShowAddUrl(false); setUrlPreview(null); setSelectedVariant(null)
       setTimeout(() => refetchCompetitorPrices(), 2000)
-
-      // 3. Automaticky stáhni info o produktu z přidané URL a ulož k produktu
-      setFetchingUrlData(true)
-      try {
-        const fetchRes = await authFetch(`${API_BASE_URL}/products/${id}/fetch-url-data`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify({ url: finalUrl, market: newUrlMarket }),
-        })
-        if (fetchRes.ok) {
-          const fetchData = await fetchRes.json()
-          setUrlFetchResult({ updated: fetchData.updated || {} })
-          queryClient.invalidateQueries({ queryKey: ['product', id] })
-          queryClient.invalidateQueries({ queryKey: ['product-prices', id] })
-        }
-      } catch { /* ignore scrape errors */ } finally { setFetchingUrlData(false) }
+      // NOTE: fetch-url-data is intentionally NOT called here — this is a competitor URL,
+      // not the product's own URL. Calling fetch-url-data would overwrite the product's
+      // own price with the competitor's price.
 
     } catch { /* ignore */ } finally { setAddingUrl(false) }
   }
@@ -1867,29 +1851,6 @@ export default function ProductDetailPage() {
                 </div>
               )}
 
-              {/* Fetching URL data banner */}
-              {fetchingUrlData && (
-                <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
-                  <svg className="animate-spin w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/>
-                  </svg>
-                  <span className="text-xs text-blue-700">Stahuji informace o produktu (cena, popis, složení)…</span>
-                </div>
-              )}
-              {urlFetchResult && !fetchingUrlData && (
-                <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg">
-                  <p className="text-xs font-medium text-emerald-700">
-                    ✓ Uloženo: {[
-                      urlFetchResult.updated.price != null && `cena ${urlFetchResult.updated.price} ${urlFetchResult.updated.currency ?? ''}`,
-                      urlFetchResult.updated.name && 'název',
-                      urlFetchResult.updated.description && 'popis',
-                      urlFetchResult.updated.ingredients && 'složení',
-                    ].filter(Boolean).join(', ') || 'žádné nové informace'}
-                  </p>
-                </div>
-              )}
-
               {/* Actions */}
               <div className="flex gap-2">
                 {(urlPreview?.ok || (urlPreview && !urlPreview.ok && newUrl.trim())) && (
@@ -1900,7 +1861,7 @@ export default function ProductDetailPage() {
                     {addingUrl ? 'Přidávám...' : selectedVariant ? `Přidat variantu "${selectedVariant.label}"` : urlPreview?.ok ? 'Přidat a sledovat cenu' : 'Přidat přesto'}
                   </button>
                 )}
-                <button onClick={() => { setShowAddUrl(false); setNewUrl(''); setUrlPreview(null); setSelectedVariant(null); setUrlFetchResult(null) }}
+                <button onClick={() => { setShowAddUrl(false); setNewUrl(''); setUrlPreview(null); setSelectedVariant(null) }}
                   className="text-gray-500 px-3 py-1.5 rounded-lg text-xs hover:bg-gray-100">Zrušit</button>
               </div>
             </div>
