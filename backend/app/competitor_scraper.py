@@ -93,32 +93,8 @@ PRICE_PATTERNS = [
 ]
 
 
-async def fetch_page_content(url: str, timeout: int = 20) -> Optional[str]:
-    """
-    Stáhni stránku konkurenta. Posílá hlavičky reálného prohlížeče.
-    """
-    try:
-        # Sestav Referer z domény URL
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-    except Exception:
-        origin = "https://www.google.com"
-
-    headers = {
-        'User-Agent': USER_AGENT,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'cs-CZ,cs;q=0.9,sk;q=0.8,en-US;q=0.7,en;q=0.6',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Cache-Control': 'max-age=0',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Referer': origin,
-    }
+async def _try_fetch(url: str, headers: dict, timeout: int) -> Optional[str]:
+    """Jeden pokus o stažení stránky, vrátí HTML nebo None."""
     try:
         connector = aiohttp.TCPConnector(ssl=False)
         async with aiohttp.ClientSession(connector=connector) as session:
@@ -134,9 +110,6 @@ async def fetch_page_content(url: str, timeout: int = 20) -> Optional[str]:
                     if 'charset=' in ct:
                         enc = ct.split('charset=')[-1].split(';')[0].strip() or 'utf-8'
                     return await response.text(encoding=enc, errors='replace')
-                elif response.status in (301, 302, 303, 307, 308):
-                    logger.warning(f"Redirect nesledován správně: {url} → {response.status}")
-                    return None
                 else:
                     logger.warning(f"HTTP {response.status} při načítání {url}")
                     return None
@@ -144,8 +117,76 @@ async def fetch_page_content(url: str, timeout: int = 20) -> Optional[str]:
         logger.warning(f"Timeout ({timeout}s): {url}")
         return None
     except Exception as e:
-        logger.error(f"Chyba při načítání {url}: {e}")
+        logger.warning(f"Chyba při načítání {url}: {e}")
         return None
+
+
+async def fetch_page_content(url: str, timeout: int = 30) -> Optional[str]:
+    """
+    Stáhni stránku konkurenta. Zkouší více sad hlaviček pro obejití bot-detection.
+    """
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+    except Exception:
+        origin = "https://www.google.com"
+
+    # Sada 1: Chrome 124 s plnými Sec-CH-UA hlavičkami + Google Referer
+    headers_chrome = {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'cs-CZ,cs;q=0.9,sk;q=0.8,en-US;q=0.7,en;q=0.6',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Cache-Control': 'max-age=0',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'cross-site',
+        'Sec-Fetch-User': '?1',
+        'Sec-CH-UA': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"Windows"',
+        'DNT': '1',
+        'Referer': 'https://www.google.com/',
+    }
+
+    # Sada 2: Firefox UA jako fallback
+    headers_firefox = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'cs,sk;q=0.8,en-US;q=0.5,en;q=0.3',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'cross-site',
+        'Referer': 'https://www.google.com/',
+    }
+
+    # Sada 3: minimální hlavičky (pro weby které blokují přehlcené hlavičky)
+    headers_minimal = {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'cs-CZ,cs;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+        'Referer': origin,
+    }
+
+    for attempt, headers in enumerate([headers_chrome, headers_firefox, headers_minimal], 1):
+        result = await _try_fetch(url, headers, timeout)
+        if result is not None:
+            if attempt > 1:
+                logger.info(f"Úspěšné stažení na pokus #{attempt}: {url}")
+            return result
+        if attempt < 3:
+            await asyncio.sleep(1)  # krátká pauza mezi pokusy
+
+    logger.error(f"Všechny pokusy selhaly pro: {url}")
+    return None
 
 
 def _clean_price(raw: str) -> Optional[Decimal]:

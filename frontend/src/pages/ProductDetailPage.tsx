@@ -1798,7 +1798,10 @@ export default function ProductDetailPage() {
               {urlPreview && (
                 <div className="border border-blue-200 rounded-lg bg-white p-3 space-y-2">
                   {!urlPreview.ok ? (
-                    <p className="text-xs text-red-600">{urlPreview.error}</p>
+                    <div className="space-y-2">
+                      <p className="text-xs text-red-600">{urlPreview.error}</p>
+                      <p className="text-xs text-gray-500">Stránku se nepodařilo automaticky načíst (web blokuje roboty). Můžeš URL přidat přesto — cena se doplní ručně nebo při dalším pokusu.</p>
+                    </div>
                   ) : (
                     <>
                       {/* Detected product info */}
@@ -1889,12 +1892,12 @@ export default function ProductDetailPage() {
 
               {/* Actions */}
               <div className="flex gap-2">
-                {urlPreview?.ok && (
+                {(urlPreview?.ok || (urlPreview && !urlPreview.ok && newUrl.trim())) && (
                   <button
                     onClick={handleConfirmUrl}
-                    disabled={addingUrl || (urlPreview.variants.length > 1 && !selectedVariant)}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-1.5 rounded-lg text-xs font-medium transition">
-                    {addingUrl ? 'Přidávám...' : selectedVariant ? `Přidat variantu "${selectedVariant.label}"` : 'Přidat a sledovat cenu'}
+                    disabled={addingUrl || (urlPreview?.ok && (urlPreview.variants.length > 1 && !selectedVariant))}
+                    className={`px-4 py-1.5 rounded-lg text-xs font-medium transition ${urlPreview?.ok ? 'bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white' : 'bg-orange-500 hover:bg-orange-600 text-white'}`}>
+                    {addingUrl ? 'Přidávám...' : selectedVariant ? `Přidat variantu "${selectedVariant.label}"` : urlPreview?.ok ? 'Přidat a sledovat cenu' : 'Přidat přesto'}
                   </button>
                 )}
                 <button onClick={() => { setShowAddUrl(false); setNewUrl(''); setUrlPreview(null); setSelectedVariant(null); setUrlFetchResult(null) }}
