@@ -242,6 +242,97 @@ def _sync_by_sku(db: Session, product_code: Optional[str], name: Optional[str], 
         pass  # Best-effort
 
 
+def _ensure_tracked_product(
+    db, catalog_product_id, company_id, name, ean, product_code, market,
+    price_vat=None, stock=None, thumbnail_url=None, url_reference=None,
+    canonical_attrs=None, target_weight_g=None,
+    must_have=None, should_have=None, must_not_have=None,
+) -> None:
+    """
+    Zajistí, že pro daný CatalogProduct existuje sledovaný Product.
+    Pokud neexistuje (ani dle catalog_product_id, EAN ani SKU), vytvoří nový.
+    Pokud existuje, pouze propojí s katalogem (catalog_product_id) pokud ještě není.
+    Voláno při každém importu feedu — idempotentní.
+    """
+    from app.models import Product, Price
+    currency = 'CZK' if market == 'CZ' else ('EUR' if market == 'SK' else 'HUF')
+
+    try:
+        # Hledej existující sledovaný produkt (3 fallbacky)
+        existing = None
+        if catalog_product_id:
+            existing = db.query(Product).filter(
+                Product.catalog_product_id == catalog_product_id,
+                Product.company_id == company_id,
+            ).first()
+        if not existing and ean:
+            existing = db.query(Product).filter(
+                Product.ean == ean,
+                Product.company_id == company_id,
+            ).first()
+        if not existing and product_code:
+            existing = db.query(Product).filter(
+                Product.sku == product_code,
+                Product.company_id == company_id,
+            ).first()
+
+        if existing:
+            # Propoj s katalogem, pokud ještě není
+            changed = False
+            if not existing.catalog_product_id and catalog_product_id:
+                existing.catalog_product_id = catalog_product_id
+                changed = True
+            if thumbnail_url and not existing.thumbnail_url:
+                existing.thumbnail_url = thumbnail_url
+                changed = True
+            if changed:
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
+            return
+
+        # Produkkt ještě neexistuje — vytvoříme nový sledovaný produkt
+        sku = (product_code or ean or '').strip()
+        if not sku or not name:
+            return  # Nelze vytvořit bez identifikátoru a názvu
+
+        tracked = Product(
+            company_id=company_id,
+            name=name,
+            sku=sku,
+            product_code=product_code,
+            ean=ean,
+            catalog_product_id=catalog_product_id,
+            thumbnail_url=thumbnail_url,
+            url_reference=url_reference,
+            stock_quantity=stock,
+            canonical_attributes_json=canonical_attrs or {},
+            target_weight_g=target_weight_g,
+            must_have_terms_json=must_have or [],
+            should_have_terms_json=should_have or [],
+            must_not_have_terms_json=must_not_have or [],
+            own_market_urls_json={market: url_reference} if url_reference else {},
+        )
+        db.add(tracked)
+        db.flush()  # získej ID bez commitu
+
+        if price_vat is not None:
+            db.add(Price(
+                product_id=tracked.id,
+                market=market,
+                currency=currency,
+                current_price=price_vat,
+            ))
+
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 def _find_existing_product(db: Session, ean: Optional[str], product_code: Optional[str], market: str, company_id) -> Optional[CatalogProduct]:
     """Najdi existující produkt podle EAN nebo PRODUCTNO"""
     if ean:
@@ -311,6 +402,11 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                 _thumbnail = product_data.get('thumbnail_url')
                 _url_ref = product_data.get('url_reference')
 
+                _cat_id = None  # ID catalog_productu pro tento průchod
+                _must_have = product_data.get('must_have_terms', [])
+                _should_have = product_data.get('should_have_terms', [])
+                _must_not_have = product_data.get('must_not_have_terms', [])
+
                 if existing and feed_sub.merge_existing:
                     existing.name = name
                     existing.category = product_data.get('category')
@@ -327,18 +423,18 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                         existing.product_code = product_code
                     db.commit()
                     updated_count += 1
+                    _cat_id = existing.id
                     _sync_tracked_price(db, existing.id, price_vat, feed_sub.market, stock=_stock, thumbnail_url=_thumbnail)
                     # Propaguj canonical profil na linked Products
                     _sync_canonical_to_watched(
                         db, existing.id, canonical_attrs, target_weight_g,
-                        product_data.get('must_have_terms', []),
-                        product_data.get('should_have_terms', []),
-                        product_data.get('must_not_have_terms', []),
+                        _must_have, _should_have, _must_not_have,
                     )
                 elif existing and not feed_sub.merge_existing:
                     skipped_count += 1
+                    _cat_id = existing.id  # i pro skip chceme zajistit tracked product
                 else:
-                    catalog_product = CatalogProduct(
+                    new_cat = CatalogProduct(
                         company_id=company.id,
                         ean=ean,
                         product_code=product_code,
@@ -357,21 +453,30 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                         is_active=True,
                         catalog_identifier=f"{company.id}_{ean}_{feed_sub.market}" if ean else None
                     )
-                    db.add(catalog_product)
+                    db.add(new_cat)
                     db.commit()
                     imported_count += 1
-                    _sync_tracked_price(db, catalog_product.id, price_vat, feed_sub.market, stock=_stock, thumbnail_url=_thumbnail)
+                    _cat_id = new_cat.id
+                    _sync_tracked_price(db, new_cat.id, price_vat, feed_sub.market, stock=_stock, thumbnail_url=_thumbnail)
                     _sync_canonical_to_watched(
-                        db, catalog_product.id, canonical_attrs, target_weight_g,
-                        product_data.get('must_have_terms', []),
-                        product_data.get('should_have_terms', []),
-                        product_data.get('must_not_have_terms', []),
+                        db, new_cat.id, canonical_attrs, target_weight_g,
+                        _must_have, _should_have, _must_not_have,
                     )
 
                 # Synchronizuj název, cenu, sklad a URL pro sledované produkty
                 # (EAN matching + SKU/PRODUCTNO matching jako záloha)
                 _sync_by_ean(db, ean, name, price_vat, feed_sub.market, company.id, stock=_stock, thumbnail_url=_thumbnail, url_reference=_url_ref)
                 _sync_by_sku(db, product_code, name, price_vat, feed_sub.market, company.id, stock=_stock, thumbnail_url=_thumbnail, url_reference=_url_ref)
+
+                # Zajisti, že sledovaný Product existuje — vytvoří ho pokud neexistuje
+                if _cat_id:
+                    _ensure_tracked_product(
+                        db, _cat_id, company.id, name, ean, product_code, feed_sub.market,
+                        price_vat=price_vat, stock=_stock, thumbnail_url=_thumbnail,
+                        url_reference=_url_ref, canonical_attrs=canonical_attrs,
+                        target_weight_g=target_weight_g,
+                        must_have=_must_have, should_have=_should_have, must_not_have=_must_not_have,
+                    )
             except Exception:
                 # DŮLEŽITÉ: rollback nutný před dalším použitím session
                 # (bez rollback by SQLAlchemy odmítl další operace na broken transakci)

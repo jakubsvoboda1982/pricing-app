@@ -352,9 +352,16 @@ def list_products(
     Batch-optimized list: fetches prices, competitor prices and catalog data
     in 4 queries total instead of 3×N (N+1 fix).
     """
-    from app.models import CompetitorProductPrice
+    from app.models import CompetitorProductPrice, User
 
-    products = db.query(Product).all()
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    company_id = user.company_id if user else None
+
+    if company_id:
+        products = db.query(Product).filter(Product.company_id == company_id).all()
+    else:
+        products = db.query(Product).all()
     if not products:
         return []
 
