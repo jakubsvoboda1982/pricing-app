@@ -34,12 +34,22 @@ def _load_prices_by_market(db: Session, product_id) -> dict:
         mkt = row.market or 'CZ'
         native = _NATIVE_CURRENCY.get(mkt, 'CZK')
         currency = row.currency or 'CZK'
-        if mkt not in result or currency == native:
+        if mkt not in result:
+            # First record for this market (most recent due to ORDER BY desc) — always keep
             result[mkt] = {
                 'price': float(row.current_price) if row.current_price is not None else None,
                 'old_price': float(row.old_price) if row.old_price is not None else None,
                 'currency': currency,
             }
+        elif currency == native and result[mkt]['currency'] != native:
+            # Upgrade: we currently have a non-native currency record, replace with native
+            # (e.g. replace SK/CZK placeholder with SK/EUR)
+            result[mkt] = {
+                'price': float(row.current_price) if row.current_price is not None else None,
+                'old_price': float(row.old_price) if row.old_price is not None else None,
+                'currency': currency,
+            }
+        # Already have native currency for this market → keep the most-recent one (first inserted)
     return result
 
 
@@ -411,8 +421,14 @@ def list_products(
         mkt = mp.market or 'CZ'
         native = _NATIVE_CURRENCY.get(mkt, 'CZK')
         currency = mp.currency or 'CZK'
-        # Prefer native currency; only overwrite with non-native if slot empty
-        if mkt not in mkt_price_map[pid] or currency == native:
+        # Prefer native currency: insert if empty, or upgrade non-native → native
+        if mkt not in mkt_price_map[pid]:
+            mkt_price_map[pid][mkt] = {
+                'price': float(mp.current_price) if mp.current_price is not None else None,
+                'old_price': float(mp.old_price) if mp.old_price is not None else None,
+                'currency': currency,
+            }
+        elif currency == native and mkt_price_map[pid][mkt]['currency'] != native:
             mkt_price_map[pid][mkt] = {
                 'price': float(mp.current_price) if mp.current_price is not None else None,
                 'old_price': float(mp.old_price) if mp.old_price is not None else None,

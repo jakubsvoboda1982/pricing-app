@@ -892,11 +892,17 @@ export default function ProductDetailPage() {
   )
 
   // Our price in the active market:
-  // For non-CZ markets, prefer a Price record stored in native currency from the feed
-  const marketPriceRecord = (prices as PriceRecord[])
-    .filter(p => p.market === activeMarket)
-    .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())[0]
-  // ourPriceInMarket: native currency (EUR for SK, HUF for HU, CZK for CZ)
+  // Prefer native currency (EUR for SK, CZK for CZ, HUF for HU), then most recent.
+  // This prevents a stale CZK/EUR mismatch from shadowing the correct native price.
+  const nativeCurrency = activeCurrency // already = MARKET_CURRENCY[activeMarket]
+  const marketPriceRecord = (() => {
+    const mktPrices = (prices as PriceRecord[])
+      .filter(p => p.market === activeMarket)
+      .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
+    // Native-currency record (most recent among those)
+    return mktPrices.find(p => p.currency === nativeCurrency) ?? mktPrices[0] ?? null
+  })()
+  // ourPriceInMarket: in native currency (EUR for SK, HUF for HU, CZK for CZ)
   const ourPriceInMarket = marketPriceRecord != null
     ? Number(marketPriceRecord.current_price)
     : currentPrice != null ? toMarket(currentPrice, activeMarket) : null
