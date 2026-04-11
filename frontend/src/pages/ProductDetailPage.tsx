@@ -126,7 +126,7 @@ function MiniGauge({ score }: { score: number }) {
   const arcY = (a: number) => cy + r * Math.sin(toRad(a))
   const trackPath = `M ${arcX(-180)} ${arcY(-180)} A ${r} ${r} 0 0 1 ${arcX(0)} ${arcY(0)}`
   const endAngle = -180 + (pct / 100) * 180
-  const fillPath = pct > 0 ? `M ${arcX(-180)} ${arcY(-180)} A ${r} ${r} 0 ${pct > 50 ? 1 : 0} 1 ${arcX(endAngle)} ${arcY(endAngle)}` : ''
+  const fillPath = pct > 0 ? `M ${arcX(-180)} ${arcY(-180)} A ${r} ${r} 0 0 1 ${arcX(endAngle)} ${arcY(endAngle)}` : ''
   return (
     <div className="flex flex-col items-center">
       <svg viewBox="0 0 72 44" className="w-20 h-12">
