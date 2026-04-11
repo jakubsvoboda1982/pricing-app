@@ -50,25 +50,26 @@ export class APIClient {
     const response = await fetch(url, options)
 
     if (!response.ok) {
-      // Token vypršel nebo je neplatný - přesměruj na login
+      // Vždy přečti detail chyby z JSON těla
+      let detail: string | null = null
+      try {
+        const errBody = await response.json()
+        detail = String(errBody?.detail ?? errBody?.message ?? JSON.stringify(errBody))
+      } catch {
+        detail = `${response.status} ${response.statusText}`
+      }
+
       if (response.status === 401) {
         this.clearToken()
+        // Na chráněných stránkách přesměruj na login (vypršelá relace)
         if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
           window.location.href = '/login'
         }
-        throw new Error('Relace vypršela. Prosím přihlaš se znovu.')
+        // Na login stránce vrať skutečný detail (špatné heslo apod.)
+        throw new Error(detail ?? 'Relace vypršela. Prosím přihlaš se znovu.')
       }
-      // Přečti detail chyby z JSON těla (FastAPI vrací { "detail": "..." })
-      try {
-        const errBody = await response.json()
-        const detail = errBody?.detail ?? errBody?.message ?? JSON.stringify(errBody)
-        throw new Error(String(detail))
-      } catch (parseErr) {
-        if (parseErr instanceof SyntaxError) {
-          throw new Error(`API Error: ${response.status} ${response.statusText}`)
-        }
-        throw parseErr
-      }
+
+      throw new Error(detail ?? `API Error: ${response.status}`)
     }
 
     return response.json()

@@ -25,19 +25,21 @@ export default function LoginPage() {
       await login(email, password)
       navigate('/dashboard')
     } catch (err: any) {
-      const message = err?.message || ''
-      if (message.includes('401')) {
+      const message = (err?.message || '').toLowerCase()
+      if (message.includes('invalid credentials') || message.includes('invalid password') || message.includes('neplatné')) {
         setError('Nesprávný email nebo heslo.')
-      } else if (message.includes('Email not verified')) {
+      } else if (message.includes('email not verified')) {
         setError('Email ještě nebyl ověřen. Zkontroluj si svou schránku.')
-      } else if (message.includes('Awaiting admin approval')) {
+      } else if (message.includes('awaiting admin approval')) {
         setError('Čekáš na schválení administrátora. Kontaktuj administrátora.')
-      } else if (message.includes('403')) {
+      } else if (message.includes('deactivated') || message.includes('inactive') || message.includes('deaktivován')) {
         setError('Účet je deaktivován. Kontaktujte administrátora.')
-      } else if (message.includes('429')) {
+      } else if (message.includes('429') || message.includes('too many')) {
         setError('Příliš mnoho pokusů o přihlášení. Zkuste to později.')
+      } else if (message.includes('relace vypršela') || message.includes('session')) {
+        setError('Nesprávný email nebo heslo.')
       } else {
-        setError('Přihlášení se nezdařilo. Zkuste to prosím znovu.')
+        setError(err?.message || 'Přihlášení se nezdařilo. Zkuste to prosím znovu.')
       }
     } finally {
       setLoading(false)
