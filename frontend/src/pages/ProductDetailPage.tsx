@@ -764,26 +764,41 @@ export default function ProductDetailPage() {
     const url = (ownUrlEditing[market] ?? '').trim()
     setOwnUrlSaving(s => ({ ...s, [market]: true }))
     try {
-      // Step 1: Preview to detect variants
+      // 1. Uložit URL ihned (bez čekání na variantu)
+      await authFetch(`${API_BASE_URL}/products/${id}/own-market-url`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ market, url, variant_label: null }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['product', id] })
+      setOwnUrlEditing(s => { const n = { ...s }; delete n[market]; return n })
+
+      // 2. Paralelně: detekuj varianty (bez blokování UI)
       if (url) {
-        const previewRes = await authFetch(`${API_BASE_URL}/competitor-prices/preview`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify({ url }),
-        })
+        setOwnUrlFetchStatus(s => ({ ...s, [market]: 'fetching' }))
+        // Preview pro detekci variant + fetch dat
+        const [previewRes, fetchRes] = await Promise.all([
+          authFetch(`${API_BASE_URL}/competitor-prices/preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ url }),
+          }),
+          authFetch(`${API_BASE_URL}/products/${id}/fetch-url-data`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ url, market }),
+          }),
+        ])
         if (previewRes.ok) {
           const previewData = await previewRes.json()
-          if (previewData.variants && previewData.variants.length > 1) {
-            // Show variant selector — don't save yet
+          if (previewData.variants && previewData.variants.length >= 1) {
             setOwnUrlVariants(s => ({ ...s, [market]: previewData.variants }))
-            setOwnUrlSaving(s => ({ ...s, [market]: false }))
-            return  // user needs to select a variant first
           }
         }
+        setOwnUrlFetchStatus(s => ({ ...s, [market]: fetchRes.ok ? 'done' : 'error' }))
+        queryClient.invalidateQueries({ queryKey: ['product', id] })
+        queryClient.invalidateQueries({ queryKey: ['product-prices', id] })
       }
-
-      // No variants or empty URL — save directly
-      await _doSaveOwnUrl(market, url, ownUrlSelectedVariant[market] ?? null)
     } catch { /* ignore */ } finally {
       setOwnUrlSaving(s => ({ ...s, [market]: false }))
     }
@@ -1370,38 +1385,51 @@ export default function ProductDetailPage() {
                   ) : null}
                 </div>
 
-                {/* Variant selector (shown when variants detected) */}
-                {ownUrlVariants[mkt] && ownUrlVariants[mkt].length > 0 && (
+                {/* Variant picker — shown after URL is saved (auto-detected OR manual) */}
+                {savedUrl && !isDirty && (
                   <div className="mt-2 pl-14 space-y-1.5">
-                    <p className="text-xs font-medium text-gray-500">
-                      Detekováno {ownUrlVariants[mkt].length} variant — vyber tu, kterou chceš sledovat:
-                    </p>
-                    <div className="grid grid-cols-1 gap-1 max-h-40 overflow-y-auto">
-                      {ownUrlVariants[mkt].map((v, i) => (
-                        <button key={i}
-                          onClick={() => setOwnUrlSelectedVariant(s => ({ ...s, [mkt]: v.label }))}
-                          className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs text-left transition ${
-                            ownUrlSelectedVariant[mkt] === v.label
-                              ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-white border-gray-200 text-gray-700 hover:bg-blue-50 hover:border-blue-300'
-                          }`}>
-                          <span className="font-medium">{v.label}</span>
-                          {v.price != null && (
-                            <span className={`ml-2 font-semibold ${ownUrlSelectedVariant[mkt] === v.label ? 'text-blue-100' : 'text-emerald-700'}`}>
-                              {v.price.toLocaleString('cs-CZ')}
-                            </span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                    {ownUrlSelectedVariant[mkt] && (
-                      <button
-                        onClick={() => _doSaveOwnUrl(mkt, (ownUrlEditing[mkt] ?? savedUrl).trim(), ownUrlSelectedVariant[mkt])}
-                        disabled={ownUrlSaving[mkt]}
-                        className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-1.5 rounded text-xs font-medium transition">
-                        {ownUrlSaving[mkt] ? 'Ukládám…' : `Uložit variantu "${ownUrlSelectedVariant[mkt]}"`}
-                      </button>
+                    {/* Auto-detected variant chips */}
+                    {ownUrlVariants[mkt] && ownUrlVariants[mkt].length > 0 && (
+                      <>
+                        <p className="text-xs font-medium text-gray-500">
+                          Detekováno {ownUrlVariants[mkt].length} variant — vyber sledovanou:
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {ownUrlVariants[mkt].map((v, i) => (
+                            <button key={i}
+                              onClick={() => setOwnUrlSelectedVariant(s => ({ ...s, [mkt]: v.label }))}
+                              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition ${
+                                ownUrlSelectedVariant[mkt] === v.label
+                                  ? 'bg-blue-600 text-white border-blue-600'
+                                  : 'bg-white border-gray-300 text-gray-700 hover:border-blue-400 hover:text-blue-600'
+                              }`}>
+                              <span>{v.label}</span>
+                              {v.price != null && (
+                                <span className={`font-semibold ${ownUrlSelectedVariant[mkt] === v.label ? 'text-blue-100' : 'text-emerald-600'}`}>
+                                  {v.price.toLocaleString('cs-CZ')}
+                                </span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </>
                     )}
+                    {/* Manual variant label input (always visible) */}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={ownUrlSelectedVariant[mkt] ?? product.own_market_variant_labels?.[mkt] ?? ''}
+                        onChange={e => setOwnUrlSelectedVariant(s => ({ ...s, [mkt]: e.target.value }))}
+                        placeholder="Zadej variantu ručně (např. 500 g)"
+                        className="flex-1 text-xs bg-white border border-gray-200 rounded px-2 py-1.5 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 text-gray-700 placeholder-gray-300"
+                      />
+                      <button
+                        onClick={() => _doSaveOwnUrl(mkt, savedUrl, ownUrlSelectedVariant[mkt] || null)}
+                        disabled={ownUrlSaving[mkt]}
+                        className="flex-shrink-0 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-3 py-1.5 rounded text-xs font-medium transition">
+                        {ownUrlSaving[mkt] ? '…' : '✓ Uložit'}
+                      </button>
+                    </div>
                   </div>
                 )}
 
