@@ -218,7 +218,7 @@ async def refresh_competitor_prices(
                 logger.warning(f"CompetitorProductPrice {comp_price.id} was deleted, skipping")
                 continue
 
-            price = await scrape_competitor_price(comp_price.competitor_url)
+            price = await scrape_competitor_price(comp_price.competitor_url, variant_label=comp_price.variant_label)
 
             if price is not None:
                 # Store historical record
@@ -452,7 +452,7 @@ async def refresh_single_url(
         db.refresh(comp_price)
 
     try:
-        price = await scrape_competitor_price(comp_price.competitor_url)
+        price = await scrape_competitor_price(comp_price.competitor_url, variant_label=comp_price.variant_label)
         if price is not None:
             if comp_price.price is not None:
                 db.add(CompetitorPriceHistory(competitor_price_id=comp_price.id, price=comp_price.price))
@@ -483,6 +483,49 @@ async def refresh_single_url(
         "price": float(comp_price.price) if comp_price.price else None,
         "fetch_status": comp_price.fetch_status,
         "fetch_error": comp_price.fetch_error,
+    }
+
+
+class VariantLabelIn(BaseModel):
+    variant_label: Optional[str] = None
+
+
+@router.patch("/by-url/{comp_price_id}/variant-label")
+async def set_variant_label(
+    comp_price_id: UUID,
+    data: VariantLabelIn,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Nastav/změň variantu sledované URL a ihned znovu stáhni cenu pro správnou variantu."""
+    comp_price = db.query(CompetitorProductPrice).filter(
+        CompetitorProductPrice.id == comp_price_id
+    ).first()
+    if not comp_price:
+        raise HTTPException(status_code=404, detail="Záznam nenalezen")
+
+    comp_price.variant_label = data.variant_label
+    db.commit()
+
+    # Re-scrape with new variant label
+    try:
+        price = await scrape_competitor_price(comp_price.competitor_url, variant_label=data.variant_label)
+        if price is not None:
+            if comp_price.price is not None:
+                db.add(CompetitorPriceHistory(competitor_price_id=comp_price_id, price=comp_price.price))
+            comp_price.price = price
+            comp_price.last_fetched_at = datetime.utcnow()
+            comp_price.fetch_status = "success"
+            comp_price.fetch_error = None
+            db.commit()
+    except Exception as e:
+        logger.warning(f"Re-scrape after variant change failed: {e}")
+
+    db.refresh(comp_price)
+    return {
+        "ok": True,
+        "variant_label": comp_price.variant_label,
+        "price": float(comp_price.price) if comp_price.price else None,
     }
 
 

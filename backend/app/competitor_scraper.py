@@ -431,33 +431,97 @@ def _detect_variants(html: str) -> list[dict]:
         except Exception:
             pass
 
-    # 2. Shoptet — varianty jsou v JS proměnné nebo v data-atributech
-    # Pattern A: JS pole  variantItems / productVariants / __variants apod.
-    _PRICE_NUM = r'([0-9]+(?:[.,][0-9]{1,2})?)'
+    # 2. Custom PHP/nuties.sk formát: radio input s hodnotou "id;qty;msg;sku;NázevProduktu GraMáž;cena;..."
+    # Příklad: value="2489;1;Min. 1 ks;93010097;Mandle 100 g;1.9099;15;Max 15 ks"
+    seen_radio_ids: set = set()
+    for rv in re.findall(
+        r'<input[^>]+class=["\'][^"\']*productId[^"\']*["\'][^>]+value=["\']([^"\']+)["\']',
+        html, re.IGNORECASE
+    ):
+        parts = rv.split(';')
+        if len(parts) < 6:
+            continue
+        variant_id = parts[0].strip()
+        if variant_id in seen_radio_ids:
+            continue
+        seen_radio_ids.add(variant_id)
+        product_name = parts[4].strip()
+        price_str = parts[5].strip()
+        if not product_name:
+            continue
+        # Extrahuj gramáž / velikost z konce názvu (např. "Mandle 500 g" → "500 g")
+        size_m = re.search(
+            r'(\d+(?:[.,]\d+)?\s*(?:g|kg|ml|l|ks|pcs|db|oz|lb))\s*$',
+            product_name, re.IGNORECASE
+        )
+        label = size_m.group(1).strip() if size_m else product_name
+        try:
+            price = float(price_str.replace(',', '.'))
+        except Exception:
+            price = None
+        variants.append({'label': label, 'url': None, 'price': price, '_full_name': product_name})
+    if variants:
+        return variants
+
+    # 3. Shoptet variantListItem — HTML elementy s třídou variantListItem
+    shoptet_li = re.findall(
+        r'<li[^>]+class=["\'][^"\']*variantListItem[^"\']*["\'][^>]*>(.*?)</li>',
+        html, re.DOTALL | re.IGNORECASE
+    )
+    if len(shoptet_li) >= 2:
+        for item_html in shoptet_li[:20]:
+            name_m = re.search(r'class=["\'][^"\']*variantName[^"\']*["\'][^>]*>([^<]{1,60})<', item_html, re.IGNORECASE)
+            price_m = re.search(r'class=["\'][^"\']*(?:variantPrice|price)[^"\']*["\'][^>]*>\s*([0-9]+(?:[.,][0-9]{1,2})?)', item_html, re.IGNORECASE)
+            label = name_m.group(1).strip() if name_m else None
+            price = float(price_m.group(1).replace(',', '.')) if price_m else None
+            if label:
+                variants.append({'label': label, 'url': None, 'price': price})
+        if variants:
+            return variants
+
+    # 4. WooCommerce variations JSON v data-product_variations atributu
+    wc_m = re.search(r'data-product_variations=["\'](\[.*?\])["\']', html, re.DOTALL | re.IGNORECASE)
+    if wc_m:
+        try:
+            wc_vars = json.loads(wc_m.group(1))
+            for v in wc_vars[:20]:
+                if not isinstance(v, dict):
+                    continue
+                attrs = v.get('attributes', {})
+                label = ' / '.join(str(a) for a in attrs.values() if a) if attrs else None
+                price = v.get('display_price') or v.get('price')
+                if label:
+                    try:
+                        p = float(str(price)) if price is not None else None
+                    except Exception:
+                        p = None
+                    variants.append({'label': label, 'url': None, 'price': p})
+            if variants:
+                return variants
+        except Exception:
+            pass
+
+    # 5. JS pole v <script> s name/price klíči (WooCommerce, PrestaShop, vlastní)
     for script_block in re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL | re.IGNORECASE):
-        # Zkus parsovat JSON objekt obsahující pole variant
-        # Hledáme: "name"/"nazev"/"label" + volitelně "price"/"priceWithVat" ve stejném objektu
         for raw in re.findall(
-            r'\[(\s*\{[^[\]]{20,5000}\}(?:\s*,\s*\{[^[\]]{20,5000}\})*\s*)\]',
+            r'\[(\s*\{[^[\]]{20,3000}\}(?:\s*,\s*\{[^[\]]{20,3000}\})+\s*)\]',
             script_block, re.DOTALL
         ):
             try:
                 arr = json.loads('[' + raw + ']')
                 if not isinstance(arr, list) or len(arr) < 2:
                     continue
-                # Check that most items have a name/label field
-                name_keys = ('name', 'nazev', 'label', 'title', 'nazov')
-                price_keys = ('price', 'priceWithVat', 'priceWithVat', 'price_with_vat',
-                              'pricewithtax', 'amount', 'value')
+                name_keys = ('name', 'nazev', 'label', 'title', 'nazov', 'variant_name')
+                price_keys = ('price', 'priceWithVat', 'price_with_vat', 'display_price', 'amount')
                 found = []
                 for item in arr:
                     if not isinstance(item, dict):
                         continue
                     label = next((str(item[k]).strip() for k in name_keys if item.get(k)), None)
-                    price = next((item[k] for k in price_keys if item.get(k) is not None), None)
-                    if label and len(label) >= 2:
+                    price_raw = next((item[k] for k in price_keys if item.get(k) is not None), None)
+                    if label and 2 <= len(label) <= 100:
                         try:
-                            p = float(str(price).replace(',', '.')) if price is not None else None
+                            p = float(str(price_raw).replace(',', '.')) if price_raw is not None else None
                         except Exception:
                             p = None
                         found.append({'label': label, 'url': None, 'price': p})
@@ -466,46 +530,11 @@ def _detect_variants(html: str) -> list[dict]:
             except Exception:
                 pass
 
-        # Pattern B: Shoptet variantListItem — data atributy v HTML
-        # <span class="variantName">500 g</span> ... data-price-with-vat="9.96"
-    shoptet_items = re.findall(
-        r'(?:variantListItem|variant-item|product-variant)[^>]*data-(?:id|value)=["\'][^"\']+["\'][^>]*>(.*?)</(?:li|div|span)',
-        html, re.DOTALL | re.IGNORECASE
-    )
-    if len(shoptet_items) >= 2:
-        for item_html in shoptet_items[:20]:
-            name_m = re.search(r'(?:variantName|variant-name)[^>]*>([^<]{1,60})<', item_html, re.IGNORECASE)
-            price_m = re.search(r'(?:variantPrice|variant-price)[^>]*>\s*' + _PRICE_NUM, item_html, re.IGNORECASE)
-            label = name_m.group(1).strip() if name_m else None
-            price = float(price_m.group(1).replace(',', '.')) if price_m else None
-            if label:
-                variants.append({'label': label, 'url': None, 'price': price})
-        if variants:
-            return variants
-
-    # Pattern C: data-variant-name / data-name attributes with price
-    dv_items = re.findall(
-        r'<(?:li|div|span|button)\b[^>]*data-(?:variant-name|variant-label|option-name|name)=["\']([^"\']{2,60})["\'][^>]*(?:data-price=["\']' + _PRICE_NUM + r'["\'])?[^>]*>',
+    # 6. <option> fallback
+    for m in re.finditer(
+        r'<option\b[^>]*value=["\']([^"\']+)["\'][^>]*>([^<]{2,80})</option>',
         html, re.IGNORECASE
-    )
-    if len(dv_items) >= 2:
-        seen = set()
-        for item in dv_items[:20]:
-            label = item[0].strip() if isinstance(item, tuple) else item.strip()
-            price_raw = item[1] if isinstance(item, tuple) and len(item) > 1 else None
-            if label and label not in seen:
-                seen.add(label)
-                price = float(price_raw.replace(',', '.')) if price_raw else None
-                variants.append({'label': label, 'url': None, 'price': price})
-        if variants:
-            return variants
-
-    # Pattern D: <option> fallback (WooCommerce, PrestaShop, etc.)
-    option_pattern = re.compile(
-        r'<option\b[^>]*value=["\']([^"\']*)["\'][^>]*>([^<]{2,80})</option>',
-        re.IGNORECASE
-    )
-    for m in option_pattern.finditer(html):
+    ):
         val, label = m.group(1).strip(), m.group(2).strip()
         if not val or label.lower() in ('vyberte', 'choose', 'select', '-- vyberte --', ''):
             continue
@@ -575,6 +604,33 @@ def _extract_price_for_variant(html: str, variant_label: str) -> Optional[Decima
                             pass
         except Exception:
             pass
+
+    # nuties.sk radio input: value="id;qty;msg;sku;ProductName Gramage;price;..."
+    for rv in re.findall(
+        r'<input[^>]+class=["\'][^"\']*productId[^"\']*["\'][^>]+value=["\']([^"\']+)["\']',
+        html, re.IGNORECASE
+    ):
+        parts = rv.split(';')
+        if len(parts) < 6:
+            continue
+        product_name = parts[4].strip()
+        price_str = parts[5].strip()
+        if not product_name or not price_str:
+            continue
+        name_lower = product_name.lower()
+        # Extract size label from end of name for comparison
+        size_m = re.search(
+            r'(\d+(?:[.,]\d+)?\s*(?:g|kg|ml|l|ks|pcs|db|oz|lb))\s*$',
+            product_name, re.IGNORECASE
+        )
+        extracted_label = size_m.group(1).strip().lower() if size_m else name_lower
+        if label_lower == extracted_label or label_lower in name_lower or extracted_label in label_lower:
+            try:
+                price = Decimal(price_str.replace(',', '.'))
+                if 0 < price < 100000:
+                    return price
+            except Exception:
+                pass
 
     # Fallback: search HTML for variant label + nearby price
     escaped = re.escape(variant_label)

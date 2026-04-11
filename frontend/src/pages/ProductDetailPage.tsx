@@ -523,6 +523,11 @@ export default function ProductDetailPage() {
   const [ownUrlFetchStatus, setOwnUrlFetchStatus] = useState<Record<string, 'idle' | 'fetching' | 'done' | 'error'>>({})
   const [ownUrlVariants, setOwnUrlVariants] = useState<Record<string, Array<{ label: string; url: string | null; price: number | null }>>>({})
   const [ownUrlSelectedVariant, setOwnUrlSelectedVariant] = useState<Record<string, string>>({})
+  // Variant picker for existing competitor price records
+  const [variantPickerOpenId, setVariantPickerOpenId] = useState<string | null>(null)
+  const [variantPickerLoading, setVariantPickerLoading] = useState<Record<string, boolean>>({})
+  const [variantPickerData, setVariantPickerData] = useState<Record<string, Array<{ label: string; url: string | null; price: number | null }>>>({})
+  const [variantPickerSaving, setVariantPickerSaving] = useState<Record<string, boolean>>({})
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
@@ -801,6 +806,47 @@ export default function ProductDetailPage() {
       }
     } catch { /* ignore */ } finally {
       setOwnUrlSaving(s => ({ ...s, [market]: false }))
+    }
+  }
+
+  const handleShowVariantPicker = async (compPriceId: string, url: string) => {
+    if (variantPickerOpenId === compPriceId) {
+      setVariantPickerOpenId(null)
+      return
+    }
+    setVariantPickerOpenId(compPriceId)
+    // Load variants if not yet cached
+    if (!variantPickerData[compPriceId]) {
+      setVariantPickerLoading(s => ({ ...s, [compPriceId]: true }))
+      try {
+        const res = await authFetch(`${API_BASE_URL}/competitor-prices/preview`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ url }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setVariantPickerData(s => ({ ...s, [compPriceId]: data.variants || [] }))
+        }
+      } catch { /* ignore */ } finally {
+        setVariantPickerLoading(s => ({ ...s, [compPriceId]: false }))
+      }
+    }
+  }
+
+  const handleSaveVariantLabel = async (compPriceId: string, variantLabel: string | null) => {
+    setVariantPickerSaving(s => ({ ...s, [compPriceId]: true }))
+    try {
+      await authFetch(`${API_BASE_URL}/competitor-prices/by-url/${compPriceId}/variant-label`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ variant_label: variantLabel }),
+      })
+      setVariantPickerOpenId(null)
+      refetchCompetitorPrices()
+      queryClient.invalidateQueries({ queryKey: ['product', id] })
+    } catch { /* ignore */ } finally {
+      setVariantPickerSaving(s => ({ ...s, [compPriceId]: false }))
     }
   }
 
@@ -1952,6 +1998,14 @@ export default function ProductDetailPage() {
                             {isHistoryOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                           </button>
                         )}
+                        {priceRecord && (
+                          <button
+                            onClick={() => handleShowVariantPicker(priceRecord.id, item.url)}
+                            title="Nastavit variantu"
+                            className={`p-1.5 rounded-lg transition text-[10px] font-bold ${variantPickerOpenId === priceRecord.id ? 'text-violet-600 bg-white' : 'text-gray-400 hover:text-violet-500 hover:bg-white'}`}>
+                            <Scale size={13} />
+                          </button>
+                        )}
                         <button
                           onClick={() => { setEditingUrlItem(editingUrlItem === item.url ? null : item.url); setEditingUrlInput(item.url) }}
                           title="Změnit URL"
@@ -1970,6 +2024,58 @@ export default function ProductDetailPage() {
                       <p className="px-4 pb-2 text-xs text-red-500 flex items-center gap-1">
                         <AlertCircle size={10} /> {priceRecord.fetch_error}
                       </p>
+                    )}
+
+                    {/* Variant picker for existing competitor price records */}
+                    {priceRecord && variantPickerOpenId === priceRecord.id && (
+                      <div className="px-4 pb-3 pt-2 border-t border-violet-100 bg-violet-50">
+                        <p className="text-xs font-semibold text-violet-700 mb-2 flex items-center gap-1">
+                          <Scale size={11} /> Vyber variantu produktu
+                        </p>
+                        {variantPickerLoading[priceRecord.id] ? (
+                          <p className="text-xs text-violet-500 animate-pulse">Načítám varianty ze stránky...</p>
+                        ) : variantPickerData[priceRecord.id]?.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            <button
+                              onClick={() => handleSaveVariantLabel(priceRecord.id, null)}
+                              disabled={variantPickerSaving[priceRecord.id]}
+                              className={`text-xs px-2 py-1 rounded-full border font-medium transition ${
+                                !priceRecord.variant_label
+                                  ? 'bg-violet-600 text-white border-violet-600'
+                                  : 'bg-white text-gray-600 border-gray-300 hover:border-violet-400 hover:text-violet-600'
+                              }`}>
+                              Celý produkt
+                            </button>
+                            {variantPickerData[priceRecord.id].map((v, i) => (
+                              <button
+                                key={i}
+                                onClick={() => handleSaveVariantLabel(priceRecord.id, v.label)}
+                                disabled={variantPickerSaving[priceRecord.id]}
+                                className={`text-xs px-2 py-1 rounded-full border font-medium transition ${
+                                  priceRecord.variant_label === v.label
+                                    ? 'bg-violet-600 text-white border-violet-600'
+                                    : 'bg-white text-gray-600 border-gray-300 hover:border-violet-400 hover:text-violet-600'
+                                }`}>
+                                {v.label}
+                                {v.price != null && (
+                                  <span className="ml-1 font-bold">
+                                    {v.price.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {priceRecord.currency}
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-500 mb-2">
+                            Žádné varianty nenalezeny. Produkt je pravděpodobně bez variant.
+                          </p>
+                        )}
+                        <button
+                          onClick={() => setVariantPickerOpenId(null)}
+                          className="text-xs text-gray-400 hover:text-gray-600">
+                          Zavřít
+                        </button>
+                      </div>
                     )}
 
                     {/* Edit URL */}
