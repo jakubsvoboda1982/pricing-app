@@ -796,9 +796,8 @@ export default function ProductDetailPage() {
         ])
         if (previewRes.ok) {
           const previewData = await previewRes.json()
-          if (previewData.variants && previewData.variants.length >= 1) {
-            setOwnUrlVariants(s => ({ ...s, [market]: previewData.variants }))
-          }
+          // Always set (even empty array) so UI knows detection ran
+          setOwnUrlVariants(s => ({ ...s, [market]: previewData.variants || [] }))
         }
         setOwnUrlFetchStatus(s => ({ ...s, [market]: fetchRes.ok ? 'done' : 'error' }))
         queryClient.invalidateQueries({ queryKey: ['product', id] })
@@ -806,6 +805,29 @@ export default function ProductDetailPage() {
       }
     } catch { /* ignore */ } finally {
       setOwnUrlSaving(s => ({ ...s, [market]: false }))
+    }
+  }
+
+  // Detect variants from web for own market URL (on-demand button)
+  const handleDetectOwnVariants = async (market: string, url: string) => {
+    setOwnUrlFetchStatus(s => ({ ...s, [market]: 'fetching' }))
+    try {
+      const res = await authFetch(`${API_BASE_URL}/competitor-prices/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ url }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.variants?.length > 0) {
+          setOwnUrlVariants(s => ({ ...s, [market]: data.variants }))
+        } else {
+          setOwnUrlVariants(s => ({ ...s, [market]: [] }))
+        }
+      }
+      setOwnUrlFetchStatus(s => ({ ...s, [market]: 'done' }))
+    } catch {
+      setOwnUrlFetchStatus(s => ({ ...s, [market]: 'error' }))
     }
   }
 
@@ -1431,51 +1453,68 @@ export default function ProductDetailPage() {
                   ) : null}
                 </div>
 
-                {/* Variant picker — shown after URL is saved (auto-detected OR manual) */}
+                {/* Variant picker — shown after URL is saved */}
                 {savedUrl && !isDirty && (
-                  <div className="mt-2 pl-14 space-y-1.5">
-                    {/* Auto-detected variant chips */}
-                    {ownUrlVariants[mkt] && ownUrlVariants[mkt].length > 0 && (
-                      <>
-                        <p className="text-xs font-medium text-gray-500">
-                          Detekováno {ownUrlVariants[mkt].length} variant — vyber sledovanou:
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {ownUrlVariants[mkt].map((v, i) => (
-                            <button key={i}
-                              onClick={() => setOwnUrlSelectedVariant(s => ({ ...s, [mkt]: v.label }))}
-                              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition ${
-                                ownUrlSelectedVariant[mkt] === v.label
+                  <div className="mt-2 pl-14">
+                    {/* State A: variants detected — show chips */}
+                    {ownUrlVariants[mkt] !== undefined && (
+                      ownUrlVariants[mkt].length > 0 ? (
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-medium text-gray-500">
+                            Detekováno {ownUrlVariants[mkt].length} variant — vyber sledovanou:
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              onClick={() => _doSaveOwnUrl(mkt, savedUrl, null)}
+                              disabled={ownUrlSaving[mkt]}
+                              className={`px-2.5 py-1 rounded-full border text-xs font-medium transition disabled:opacity-50 ${
+                                !product.own_market_variant_labels?.[mkt]
                                   ? 'bg-blue-600 text-white border-blue-600'
-                                  : 'bg-white border-gray-300 text-gray-700 hover:border-blue-400 hover:text-blue-600'
+                                  : 'bg-white border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600'
                               }`}>
-                              <span>{v.label}</span>
-                              {v.price != null && (
-                                <span className={`font-semibold ${ownUrlSelectedVariant[mkt] === v.label ? 'text-blue-100' : 'text-emerald-600'}`}>
-                                  {v.price.toLocaleString('cs-CZ')}
-                                </span>
-                              )}
+                              Celý produkt
                             </button>
-                          ))}
+                            {ownUrlVariants[mkt].map((v, i) => (
+                              <button key={i}
+                                onClick={() => _doSaveOwnUrl(mkt, savedUrl, v.label)}
+                                disabled={ownUrlSaving[mkt]}
+                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition disabled:opacity-50 ${
+                                  product.own_market_variant_labels?.[mkt] === v.label
+                                    ? 'bg-blue-600 text-white border-blue-600'
+                                    : 'bg-white border-gray-300 text-gray-700 hover:border-blue-400 hover:text-blue-600'
+                                }`}>
+                                <span>{v.label}</span>
+                                {v.price != null && (
+                                  <span className={`font-semibold ${product.own_market_variant_labels?.[mkt] === v.label ? 'text-blue-100' : 'text-emerald-600'}`}>
+                                    {v.price.toLocaleString('cs-CZ')}
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </>
+                      ) : (
+                        <p className="text-xs text-gray-400 italic">Žádné varianty na stránce nenalezeny — produkt bez variant.</p>
+                      )
                     )}
-                    {/* Manual variant label input (always visible) */}
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={ownUrlSelectedVariant[mkt] ?? product.own_market_variant_labels?.[mkt] ?? ''}
-                        onChange={e => setOwnUrlSelectedVariant(s => ({ ...s, [mkt]: e.target.value }))}
-                        placeholder="Zadej variantu ručně (např. 500 g)"
-                        className="flex-1 text-xs bg-white border border-gray-200 rounded px-2 py-1.5 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 text-gray-700 placeholder-gray-300"
-                      />
-                      <button
-                        onClick={() => _doSaveOwnUrl(mkt, savedUrl, ownUrlSelectedVariant[mkt] || null)}
-                        disabled={ownUrlSaving[mkt]}
-                        className="flex-shrink-0 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-3 py-1.5 rounded text-xs font-medium transition">
-                        {ownUrlSaving[mkt] ? '…' : '✓ Uložit'}
-                      </button>
-                    </div>
+                    {/* State B: variants not yet loaded — show detect button */}
+                    {ownUrlVariants[mkt] === undefined && (
+                      <div className="flex items-center gap-2">
+                        {product.own_market_variant_labels?.[mkt] && (
+                          <span className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded px-2 py-1 flex-shrink-0">
+                            📦 {product.own_market_variant_labels[mkt]}
+                          </span>
+                        )}
+                        <button
+                          onClick={() => handleDetectOwnVariants(mkt, savedUrl)}
+                          disabled={fetchStatus === 'fetching'}
+                          className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 hover:border-blue-300 px-2.5 py-1.5 rounded bg-white transition disabled:opacity-50">
+                          {fetchStatus === 'fetching' ? (
+                            <><svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/></svg>Načítám…</>
+                          ) : <><span>🔍</span> Načíst varianty ze stránky</>}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1485,11 +1524,6 @@ export default function ProductDetailPage() {
                     {mktPrice?.price != null && (
                       <span className="text-xs text-emerald-700 font-semibold">
                         {mktPrice.price.toLocaleString('cs-CZ')} {mktPrice.currency}
-                      </span>
-                    )}
-                    {product.own_market_variant_labels?.[mkt] && (
-                      <span className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5">
-                        📦 {product.own_market_variant_labels[mkt]}
                       </span>
                     )}
                     {mktAttrs?.description && (
