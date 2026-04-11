@@ -54,12 +54,14 @@ def _get_company(db: Session) -> Company:
     return company
 
 
-def _sync_tracked_price(db: Session, catalog_product_id, price_vat, market: str):
+def _sync_tracked_price(db: Session, catalog_product_id, price_vat, market: str,
+                        stock: int = None, thumbnail_url: str = None):
     """
     If any tracked Product is linked to this catalog_product_id,
     update (or create) its Price record with the VAT-inclusive selling price.
+    Also syncs stock_quantity and thumbnail_url if provided.
     """
-    if price_vat is None:
+    if price_vat is None and stock is None:
         return
     from app.models import Product, Price
     from sqlalchemy import desc
@@ -67,25 +69,30 @@ def _sync_tracked_price(db: Session, catalog_product_id, price_vat, market: str)
         Product.catalog_product_id == catalog_product_id
     ).all()
     for product in tracked:
-        latest = db.query(Price).filter(
-            Price.product_id == product.id,
-            Price.market == market,
-        ).order_by(desc(Price.changed_at)).first()
-        if latest:
-            # Only update if price actually changed
-            if latest.current_price != price_vat:
-                latest.old_price = latest.current_price
-                latest.current_price = price_vat
-                db.commit()
-        else:
-            new_price = Price(
-                product_id=product.id,
-                market=market,
-                currency='CZK' if market == 'CZ' else 'EUR',
-                current_price=price_vat,
-            )
-            db.add(new_price)
-            db.commit()
+        # Sync price
+        if price_vat is not None:
+            latest = db.query(Price).filter(
+                Price.product_id == product.id,
+                Price.market == market,
+            ).order_by(desc(Price.changed_at)).first()
+            if latest:
+                if latest.current_price != price_vat:
+                    latest.old_price = latest.current_price
+                    latest.current_price = price_vat
+            else:
+                db.add(Price(
+                    product_id=product.id,
+                    market=market,
+                    currency='CZK' if market == 'CZ' else 'EUR',
+                    current_price=price_vat,
+                ))
+        # Sync stock
+        if stock is not None:
+            product.stock_quantity = stock
+        # Sync thumbnail if not already set
+        if thumbnail_url and not product.thumbnail_url:
+            product.thumbnail_url = thumbnail_url
+        db.commit()
 
 
 def _sync_canonical_to_watched(
@@ -125,50 +132,112 @@ def _sync_canonical_to_watched(
         pass  # Best-effort
 
 
-def _sync_by_ean(db: Session, ean: Optional[str], name: Optional[str], price_vat, market: str, company_id) -> None:
+def _sync_products_from_feed(
+    db: Session,
+    tracked_products,
+    name: Optional[str],
+    price_vat,
+    market: str,
+    stock: int = None,
+    thumbnail_url: str = None,
+    url_reference: str = None,
+) -> None:
     """
-    Pro produkty sledované s daným EAN (bez ohledu na catalog_product_id):
-    - Vytvoří/aktualizuje Price záznam pro daný trh
-    - Uloží název produktu z feedu do market_names_json[market]
-    Toto umožňuje zobrazit SK/HU název a cenu z feedu pro CZ produkt.
+    Sdílená logika synchronizace sledovaných produktů z feedu.
+    Aktualizuje: cenu, sklad, název pro trh, thumbnail, own_market_url.
+    """
+    from app.models import Price
+    from sqlalchemy import desc
+    currency = 'CZK' if market == 'CZ' else ('EUR' if market == 'SK' else 'HUF')
+
+    for product in tracked_products:
+        changed = False
+        # Název pro daný trh
+        if name:
+            names = dict(product.market_names_json or {})
+            if names.get(market) != name:
+                names[market] = name
+                product.market_names_json = names
+                changed = True
+        # Cena
+        if price_vat is not None:
+            latest = db.query(Price).filter(
+                Price.product_id == product.id,
+                Price.market == market,
+            ).order_by(desc(Price.changed_at)).first()
+            if latest:
+                if latest.current_price != price_vat:
+                    latest.old_price = latest.current_price
+                    latest.current_price = price_vat
+                    latest.currency = currency
+                    changed = True
+            else:
+                db.add(Price(
+                    product_id=product.id,
+                    market=market,
+                    currency=currency,
+                    current_price=price_vat,
+                ))
+                changed = True
+        # Sklad
+        if stock is not None and product.stock_quantity != stock:
+            product.stock_quantity = stock
+            changed = True
+        # Thumbnail (jen pokud chybí)
+        if thumbnail_url and not product.thumbnail_url:
+            product.thumbnail_url = thumbnail_url
+            changed = True
+        # Vlastní URL trhu (jen pokud chybí)
+        if url_reference:
+            own_urls = dict(product.own_market_urls_json or {})
+            if not own_urls.get(market):
+                own_urls[market] = url_reference
+                product.own_market_urls_json = own_urls
+                changed = True
+        if changed:
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+
+
+def _sync_by_ean(db: Session, ean: Optional[str], name: Optional[str], price_vat, market: str,
+                 company_id, stock: int = None, thumbnail_url: str = None,
+                 url_reference: str = None) -> None:
+    """
+    Pro produkty sledované s daným EAN: synchronizuj cenu, sklad, název, thumbnail a vlastní URL.
     """
     if not ean:
         return
     try:
-        from app.models import Product, Price
-        from sqlalchemy import desc
+        from app.models import Product
         tracked = db.query(Product).filter(
             Product.ean == ean,
             Product.company_id == company_id,
         ).all()
-        for product in tracked:
-            # Aktualizuj název z feedu pro daný trh
-            if name:
-                names = dict(product.market_names_json or {})
-                names[market] = name
-                product.market_names_json = names
-            # Synchronizuj cenu pro daný trh
-            if price_vat is not None:
-                currency = 'CZK' if market == 'CZ' else ('EUR' if market == 'SK' else 'HUF')
-                latest = db.query(Price).filter(
-                    Price.product_id == product.id,
-                    Price.market == market,
-                ).order_by(desc(Price.changed_at)).first()
-                if latest:
-                    if latest.current_price != price_vat:
-                        latest.old_price = latest.current_price
-                        latest.current_price = price_vat
-                        latest.currency = currency
-                else:
-                    new_price = Price(
-                        product_id=product.id,
-                        market=market,
-                        currency=currency,
-                        current_price=price_vat,
-                    )
-                    db.add(new_price)
         if tracked:
-            db.commit()
+            _sync_products_from_feed(db, tracked, name, price_vat, market, stock, thumbnail_url, url_reference)
+    except Exception:
+        pass  # Best-effort
+
+
+def _sync_by_sku(db: Session, product_code: Optional[str], name: Optional[str], price_vat, market: str,
+                 company_id, stock: int = None, thumbnail_url: str = None,
+                 url_reference: str = None) -> None:
+    """
+    Pro produkty sledované s daným SKU (PRODUCTNO): synchronizuj cenu, sklad, název.
+    Fallback pro produkty bez EAN nebo s jiným EAN v DB.
+    """
+    if not product_code:
+        return
+    try:
+        from app.models import Product
+        tracked = db.query(Product).filter(
+            Product.sku == product_code,
+            Product.company_id == company_id,
+        ).all()
+        if tracked:
+            _sync_products_from_feed(db, tracked, name, price_vat, market, stock, thumbnail_url, url_reference)
     except Exception:
         pass  # Best-effort
 
@@ -237,6 +306,11 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                 canonical_attrs = product_data.get('canonical_attributes', {})
                 target_weight_g = product_data.get('target_weight_g')
 
+                # Extra pole z feedu pro synchronizaci sledovaných produktů
+                _stock = product_data.get('quantity_in_stock')
+                _thumbnail = product_data.get('thumbnail_url')
+                _url_ref = product_data.get('url_reference')
+
                 if existing and feed_sub.merge_existing:
                     existing.name = name
                     existing.category = product_data.get('category')
@@ -244,16 +318,16 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                     existing.description = product_data.get('description')
                     existing.price_without_vat = product_data.get('price_without_vat')
                     existing.vat_rate = product_data.get('vat_rate')
-                    existing.quantity_in_stock = product_data.get('quantity_in_stock')
+                    existing.quantity_in_stock = _stock
                     existing.unit_of_measure = product_data.get('unit_of_measure', 'ks')
-                    existing.thumbnail_url = product_data.get('thumbnail_url')
-                    existing.url_reference = product_data.get('url_reference')
+                    existing.thumbnail_url = _thumbnail
+                    existing.url_reference = _url_ref
                     existing.imported_from = product_data.get('imported_from')
                     if product_code and not existing.product_code:
                         existing.product_code = product_code
                     db.commit()
                     updated_count += 1
-                    _sync_tracked_price(db, existing.id, price_vat, feed_sub.market)
+                    _sync_tracked_price(db, existing.id, price_vat, feed_sub.market, stock=_stock, thumbnail_url=_thumbnail)
                     # Propaguj canonical profil na linked Products
                     _sync_canonical_to_watched(
                         db, existing.id, canonical_attrs, target_weight_g,
@@ -274,11 +348,11 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                         description=product_data.get('description'),
                         price_without_vat=product_data.get('price_without_vat'),
                         vat_rate=product_data.get('vat_rate'),
-                        quantity_in_stock=product_data.get('quantity_in_stock'),
+                        quantity_in_stock=_stock,
                         unit_of_measure=product_data.get('unit_of_measure', 'ks'),
                         market=feed_sub.market,
-                        thumbnail_url=product_data.get('thumbnail_url'),
-                        url_reference=product_data.get('url_reference'),
+                        thumbnail_url=_thumbnail,
+                        url_reference=_url_ref,
                         imported_from=product_data.get('imported_from'),
                         is_active=True,
                         catalog_identifier=f"{company.id}_{ean}_{feed_sub.market}" if ean else None
@@ -286,7 +360,7 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                     db.add(catalog_product)
                     db.commit()
                     imported_count += 1
-                    _sync_tracked_price(db, catalog_product.id, price_vat, feed_sub.market)
+                    _sync_tracked_price(db, catalog_product.id, price_vat, feed_sub.market, stock=_stock, thumbnail_url=_thumbnail)
                     _sync_canonical_to_watched(
                         db, catalog_product.id, canonical_attrs, target_weight_g,
                         product_data.get('must_have_terms', []),
@@ -294,9 +368,10 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                         product_data.get('must_not_have_terms', []),
                     )
 
-                # Synchronizuj název a cenu dle EAN pro sledované produkty v jiných trzích
-                # (např. SK feed aktualizuje SK cenu/název u produktu sledovaného v CZ)
-                _sync_by_ean(db, ean, name, price_vat, feed_sub.market, company.id)
+                # Synchronizuj název, cenu, sklad a URL pro sledované produkty
+                # (EAN matching + SKU/PRODUCTNO matching jako záloha)
+                _sync_by_ean(db, ean, name, price_vat, feed_sub.market, company.id, stock=_stock, thumbnail_url=_thumbnail, url_reference=_url_ref)
+                _sync_by_sku(db, product_code, name, price_vat, feed_sub.market, company.id, stock=_stock, thumbnail_url=_thumbnail, url_reference=_url_ref)
             except Exception:
                 # DŮLEŽITÉ: rollback nutný před dalším použitím session
                 # (bez rollback by SQLAlchemy odmítl další operace na broken transakci)

@@ -128,6 +128,23 @@ export default function ImportPage() {
     try { await apiClient.deleteFeedSubscription(id); await loadFeeds() } catch {}
   }
 
+  const NUTIES_PRESETS = [
+    { name: 'Nuties CZ — vlastní feed', feed_url: 'https://www.nuties.cz/mall-cz.ca9127c2460656660e9fd3e4071f4f17bcd155ae.xml', market: 'CZ' as const },
+    { name: 'Nuties SK — vlastní feed', feed_url: 'https://www.nuties.cz/mall-sk.1255313877ec9ddd9bb36ff98d01529d488b5f14.xml', market: 'SK' as const },
+  ]
+
+  const handleAddPreset = async (preset: typeof NUTIES_PRESETS[0]) => {
+    setAddingFeed(true)
+    setFeedResult(null)
+    try {
+      await apiClient.createFeedSubscription({ name: preset.name, feed_url: preset.feed_url, market: preset.market, merge_existing: true })
+      setFeedResult({ success: true, message: `Feed "${preset.name}" byl přidán` })
+      await loadFeeds()
+    } catch (error) {
+      setFeedResult({ success: false, message: error instanceof Error ? error.message : 'Chyba při přidávání feedu' })
+    } finally { setAddingFeed(false) }
+  }
+
   const handleFetchFeed = async (id: string) => {
     setFetchingFeedId(id)
     try {
@@ -343,6 +360,31 @@ export default function ImportPage() {
       {/* ===== TAB: Automatické feedy ===== */}
       {activeTab === 'feeds' && (
         <div className="space-y-4">
+
+          {/* Nuties presets */}
+          {(() => {
+            const existingUrls = new Set(feeds.map(f => f.feed_url))
+            const missing = NUTIES_PRESETS.filter(p => !existingUrls.has(p.feed_url))
+            if (missing.length === 0) return null
+            return (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-blue-900">⚡ Vlastní feedy Nuties</p>
+                  <p className="text-xs text-blue-600 mt-0.5">Přidej feedy jedním klikem — automaticky se sloučí s existujícími produkty</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {missing.map(preset => (
+                    <button key={preset.feed_url} onClick={() => handleAddPreset(preset)} disabled={addingFeed}
+                      className="flex items-center gap-1.5 bg-white border border-blue-300 hover:bg-blue-100 text-blue-800 px-3 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50">
+                      <Plus size={13} />
+                      {preset.market === 'CZ' ? '🇨🇿' : '🇸🇰'} {preset.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Add feed */}
           <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
             <div>
