@@ -63,6 +63,7 @@ interface Product {
   market_names?: Record<string, string>
   market_attributes?: Record<string, { description?: string; ingredients?: string }> | null
   own_market_urls?: Record<string, string> | null
+  own_market_variant_labels?: Record<string, string> | null
   prices_by_market?: Record<string, { price: number | null; old_price?: number | null; currency: string }> | null
   stock_divisor?: number | null
   created_at: string
@@ -520,6 +521,8 @@ export default function ProductDetailPage() {
   const [ownUrlEditing, setOwnUrlEditing] = useState<Record<string, string>>({})
   const [ownUrlSaving, setOwnUrlSaving] = useState<Record<string, boolean>>({})
   const [ownUrlFetchStatus, setOwnUrlFetchStatus] = useState<Record<string, 'idle' | 'fetching' | 'done' | 'error'>>({})
+  const [ownUrlVariants, setOwnUrlVariants] = useState<Record<string, Array<{ label: string; url: string | null; price: number | null }>>>({})
+  const [ownUrlSelectedVariant, setOwnUrlSelectedVariant] = useState<Record<string, string>>({})
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
@@ -724,19 +727,17 @@ export default function ProductDetailPage() {
     }
   }
 
-  const handleSaveOwnUrl = async (market: string) => {
-    const url = (ownUrlEditing[market] ?? '').trim()
+  const _doSaveOwnUrl = async (market: string, url: string, variantLabel: string | null) => {
     setOwnUrlSaving(s => ({ ...s, [market]: true }))
     try {
-      // 1. Save URL
       await authFetch(`${API_BASE_URL}/products/${id}/own-market-url`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ market, url }),
+        body: JSON.stringify({ market, url, variant_label: variantLabel }),
       })
       queryClient.invalidateQueries({ queryKey: ['product', id] })
+      setOwnUrlVariants(s => { const n = { ...s }; delete n[market]; return n })
 
-      // 2. If URL set, auto-fetch product info
       if (url) {
         setOwnUrlFetchStatus(s => ({ ...s, [market]: 'fetching' }))
         try {
@@ -745,17 +746,44 @@ export default function ProductDetailPage() {
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify({ url, market }),
           })
+          setOwnUrlFetchStatus(s => ({ ...s, [market]: res.ok ? 'done' : 'error' }))
           if (res.ok) {
-            setOwnUrlFetchStatus(s => ({ ...s, [market]: 'done' }))
             queryClient.invalidateQueries({ queryKey: ['product', id] })
             queryClient.invalidateQueries({ queryKey: ['product-prices', id] })
-          } else {
-            setOwnUrlFetchStatus(s => ({ ...s, [market]: 'error' }))
           }
         } catch {
           setOwnUrlFetchStatus(s => ({ ...s, [market]: 'error' }))
         }
       }
+    } catch { /* ignore */ } finally {
+      setOwnUrlSaving(s => ({ ...s, [market]: false }))
+    }
+  }
+
+  const handleSaveOwnUrl = async (market: string) => {
+    const url = (ownUrlEditing[market] ?? '').trim()
+    setOwnUrlSaving(s => ({ ...s, [market]: true }))
+    try {
+      // Step 1: Preview to detect variants
+      if (url) {
+        const previewRes = await authFetch(`${API_BASE_URL}/competitor-prices/preview`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ url }),
+        })
+        if (previewRes.ok) {
+          const previewData = await previewRes.json()
+          if (previewData.variants && previewData.variants.length > 1) {
+            // Show variant selector — don't save yet
+            setOwnUrlVariants(s => ({ ...s, [market]: previewData.variants }))
+            setOwnUrlSaving(s => ({ ...s, [market]: false }))
+            return  // user needs to select a variant first
+          }
+        }
+      }
+
+      // No variants or empty URL — save directly
+      await _doSaveOwnUrl(market, url, ownUrlSelectedVariant[market] ?? null)
     } catch { /* ignore */ } finally {
       setOwnUrlSaving(s => ({ ...s, [market]: false }))
     }
@@ -1342,12 +1370,52 @@ export default function ProductDetailPage() {
                   ) : null}
                 </div>
 
+                {/* Variant selector (shown when variants detected) */}
+                {ownUrlVariants[mkt] && ownUrlVariants[mkt].length > 0 && (
+                  <div className="mt-2 pl-14 space-y-1.5">
+                    <p className="text-xs font-medium text-gray-500">
+                      Detekováno {ownUrlVariants[mkt].length} variant — vyber tu, kterou chceš sledovat:
+                    </p>
+                    <div className="grid grid-cols-1 gap-1 max-h-40 overflow-y-auto">
+                      {ownUrlVariants[mkt].map((v, i) => (
+                        <button key={i}
+                          onClick={() => setOwnUrlSelectedVariant(s => ({ ...s, [mkt]: v.label }))}
+                          className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs text-left transition ${
+                            ownUrlSelectedVariant[mkt] === v.label
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-white border-gray-200 text-gray-700 hover:bg-blue-50 hover:border-blue-300'
+                          }`}>
+                          <span className="font-medium">{v.label}</span>
+                          {v.price != null && (
+                            <span className={`ml-2 font-semibold ${ownUrlSelectedVariant[mkt] === v.label ? 'text-blue-100' : 'text-emerald-700'}`}>
+                              {v.price.toLocaleString('cs-CZ')}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    {ownUrlSelectedVariant[mkt] && (
+                      <button
+                        onClick={() => _doSaveOwnUrl(mkt, (ownUrlEditing[mkt] ?? savedUrl).trim(), ownUrlSelectedVariant[mkt])}
+                        disabled={ownUrlSaving[mkt]}
+                        className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-1.5 rounded text-xs font-medium transition">
+                        {ownUrlSaving[mkt] ? 'Ukládám…' : `Uložit variantu "${ownUrlSelectedVariant[mkt]}"`}
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {/* Status row */}
                 {savedUrl && (
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-14">
                     {mktPrice?.price != null && (
                       <span className="text-xs text-emerald-700 font-semibold">
                         {mktPrice.price.toLocaleString('cs-CZ')} {mktPrice.currency}
+                      </span>
+                    )}
+                    {product.own_market_variant_labels?.[mkt] && (
+                      <span className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5">
+                        📦 {product.own_market_variant_labels[mkt]}
                       </span>
                     )}
                     {mktAttrs?.description && (

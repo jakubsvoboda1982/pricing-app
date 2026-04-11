@@ -102,6 +102,7 @@ class ProductResponse(BaseModel):
     # Per-market atributy stažené z URL: {"SK": {"description": "...", "ingredients": "..."}, ...}
     market_attributes: Optional[Dict[str, Any]] = None
     own_market_urls: Optional[Dict[str, Any]] = None
+    own_market_variant_labels: Optional[Dict[str, Any]] = None
     stock_divisor: Optional[int] = 1
     prices_by_market: Optional[Dict[str, Any]] = None  # {CZ: {price, currency}, SK: {price, currency}}
     manufacturing_cost_with_vat: Optional[Decimal] = None

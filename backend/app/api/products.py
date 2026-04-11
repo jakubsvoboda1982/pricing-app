@@ -334,6 +334,7 @@ def _enrich_with_price(
         'market_names': getattr(product, 'market_names_json', None) or {},
         'market_attributes': getattr(product, 'market_attributes_json', None) or {},
         'own_market_urls': getattr(product, 'own_market_urls_json', None) or {},
+        'own_market_variant_labels': getattr(product, 'own_market_variant_labels_json', None) or {},
         'stock_divisor': getattr(product, 'stock_divisor', None) or 1,
         'prices_by_market': _prices_by_market or {},
         'manufacturing_cost_with_vat': manufacturing_cost_with_vat,
@@ -1027,8 +1028,23 @@ async def fetch_url_data(
     _MARKET_CURRENCY = {'CZ': 'CZK', 'SK': 'EUR', 'HU': 'HUF'}
     currency = _MARKET_CURRENCY.get(market, 'CZK')
 
+    # Get variant label for this market (if set)
+    variant_labels = dict(getattr(product, 'own_market_variant_labels_json', None) or {})
+    _variant_label = variant_labels.get(market)
+
     # Scrape URL
     result = await preview_competitor_url(url)
+
+    # If variant_label is set, override detected_price with variant-specific price
+    if _variant_label and result.get('variants'):
+        from app.competitor_scraper import _extract_price_for_variant
+        for v in result.get('variants', []):
+            vlabel = str(v.get('label', '')).lower()
+            if _variant_label.lower() in vlabel or vlabel in _variant_label.lower():
+                if v.get('price') is not None:
+                    result = dict(result)
+                    result['detected_price'] = v['price']
+                    break
 
     updated: dict = {}
 
@@ -1089,6 +1105,7 @@ async def fetch_url_data(
 class OwnMarketUrlIn(BaseModel):
     market: str
     url: str  # empty string = clear the URL
+    variant_label: Optional[str] = None  # e.g. "500 g" — variant to track on this URL
 
 
 @router.put("/{product_id}/own-market-url")
@@ -1117,6 +1134,15 @@ async def set_own_market_url(
         urls.pop(market, None)
 
     product.own_market_urls_json = urls
+
+    # Save variant label
+    variant_labels = dict(getattr(product, 'own_market_variant_labels_json', None) or {})
+    if payload.variant_label:
+        variant_labels[market] = payload.variant_label
+    elif not url:
+        # clearing the URL also clears the variant label
+        variant_labels.pop(market, None)
+    product.own_market_variant_labels_json = variant_labels
 
     # Synchronizuj url_reference s CZ URL (nebo první dostupnou)
     if market == 'CZ':

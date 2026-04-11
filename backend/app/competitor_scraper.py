@@ -452,7 +452,84 @@ def _detect_variants(html: str) -> list[dict]:
     return variants
 
 
-async def scrape_competitor_price(url: str) -> Optional[Decimal]:
+def _extract_price_for_variant(html: str, variant_label: str) -> Optional[Decimal]:
+    """
+    Extrahuj cenu pro konkrétní variantu produktu (dle labelu, např. '500 g').
+    Používá JSON-LD hasVariant. Pokud varianta nebyla nalezena, vrátí None
+    a caller by měl zkusit generickou extrakci.
+    """
+    if not variant_label:
+        return None
+
+    label_lower = variant_label.lower().strip()
+    _PRICE_RE = r'([1-9][0-9]{0,2}(?:[\s\xa0][0-9]{3})*(?:[.,][0-9]{1,2})?)'
+
+    for block in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                             html, re.DOTALL | re.IGNORECASE):
+        try:
+            data = json.loads(block)
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict) and '@graph' in item:
+                    items = items + item['@graph']
+                if not isinstance(item, dict):
+                    continue
+                variants = item.get('hasVariant') or []
+                if not isinstance(variants, list):
+                    continue
+                best_match = None
+                best_score = 0
+                for v in variants:
+                    if not isinstance(v, dict):
+                        continue
+                    v_name = str(v.get('name', '')).lower().strip()
+                    # Score: exact match > contains > word overlap
+                    if v_name == label_lower:
+                        score = 3
+                    elif label_lower in v_name or v_name in label_lower:
+                        score = 2
+                    else:
+                        # word overlap
+                        words_a = set(re.split(r'[\s,./]+', label_lower))
+                        words_b = set(re.split(r'[\s,./]+', v_name))
+                        overlap = words_a & words_b - {''}
+                        score = len(overlap)
+                    if score > best_score:
+                        best_score = score
+                        best_match = v
+                if best_match and best_score > 0:
+                    offer = best_match.get('offers') or {}
+                    if isinstance(offer, list):
+                        offer = offer[0] if offer else {}
+                    price_str = str(offer.get('price', '') or '').strip()
+                    if price_str:
+                        try:
+                            return Decimal(price_str.replace(',', '.'))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    # Fallback: search HTML for variant label + nearby price
+    escaped = re.escape(variant_label)
+    for pattern in [
+        rf'{escaped}[^<]{{0,100}}?{_PRICE_RE}\s*(?:€|EUR|Kč|CZK|Ft|HUF)',
+        rf'>{escaped}<[^>]*>[^<]{{0,200}}{_PRICE_RE}',
+    ]:
+        try:
+            m = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+            if m:
+                raw = m.group(1).replace('\xa0', '').replace(' ', '').replace(',', '.')
+                val = Decimal(raw)
+                if 0 < val < 100000:
+                    return val
+        except Exception:
+            pass
+
+    return None
+
+
+async def scrape_competitor_price(url: str, variant_label: Optional[str] = None) -> Optional[Decimal]:
     """
     Scrape a single competitor URL and return the price.
     Returns price as Decimal or None if unable to extract.
@@ -460,6 +537,13 @@ async def scrape_competitor_price(url: str) -> Optional[Decimal]:
     try:
         html = await fetch_page_content(url)
         if html:
+            # If a specific variant label is requested, try variant-aware extraction first
+            if variant_label:
+                variant_price = _extract_price_for_variant(html, variant_label)
+                if variant_price is not None:
+                    logger.info(f"Variant price [{variant_label}] from {url}: {variant_price}")
+                    return variant_price
+                logger.warning(f"Variant [{variant_label}] not found on {url}, falling back to generic")
             price = extract_price(html, url)
             return price
     except Exception as e:
@@ -521,7 +605,7 @@ async def update_competitor_prices_for_product(product_id: str, db: Session) -> 
         for comp_price in comp_prices:
             try:
                 # Scrape the competitor URL
-                price = await scrape_competitor_price(comp_price.competitor_url)
+                price = await scrape_competitor_price(comp_price.competitor_url, variant_label=comp_price.variant_label)
 
                 if price is not None:
                     # Store historical record before updating
@@ -592,7 +676,7 @@ async def update_all_competitor_prices() -> dict:
         # Process in batches to avoid overwhelming the system
         for comp_price in due_for_update:
             try:
-                price = await scrape_competitor_price(comp_price.competitor_url)
+                price = await scrape_competitor_price(comp_price.competitor_url, variant_label=comp_price.variant_label)
 
                 if price is not None:
                     # Store historical record
@@ -715,9 +799,11 @@ async def _update_own_prices_all(db: Session) -> int:
                 else:
                     market_urls.append((own_url, 'CZ', 'CZK'))
 
+            variant_labels = dict(getattr(product, 'own_market_variant_labels_json', None) or {})
             for mkt_url, mkt, mkt_currency in market_urls:
                 try:
-                    scraped_price = await scrape_competitor_price(mkt_url)
+                    variant_label = variant_labels.get(mkt)
+                    scraped_price = await scrape_competitor_price(mkt_url, variant_label=variant_label)
                     if scraped_price is None:
                         continue
 
