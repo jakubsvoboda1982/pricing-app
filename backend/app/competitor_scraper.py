@@ -571,7 +571,45 @@ def _detect_variants(html: str) -> list[dict]:
             except Exception:
                 pass
 
-    # 6. <option> fallback
+    # 6. data-testid="productVariant" tabulka (nutsman.cz a podobné weby)
+    # <tr data-testid="productVariant">
+    #   <td data-testid="productVariantName">Množství: 250 g</td>
+    #   <td data-testid="productVariantPrice"><strong>99 Kč /ks</strong></td>
+    # </tr>
+    _PREFIX_RE = re.compile(
+        r'^(?:Množství|Velikost|Balení|Hmotnost|Objem|Velikost\s+balení)\s*:\s*',
+        re.IGNORECASE
+    )
+    for row in re.findall(
+        r'<tr[^>]*data-testid=["\']productVariant["\'][^>]*>(.*?)</tr>',
+        html, re.DOTALL | re.IGNORECASE
+    ):
+        name_m = re.search(
+            r'data-testid=["\']productVariantName["\'][^>]*>\s*([^<]{1,120})',
+            row, re.IGNORECASE
+        )
+        if not name_m:
+            continue
+        raw_label = name_m.group(1).strip()
+        label = _PREFIX_RE.sub('', raw_label).strip() or raw_label
+        price_m = re.search(
+            r'data-testid=["\']productVariantPrice["\'][^>]*>.*?<strong[^>]*>\s*'
+            r'([\d][\d\s\xa0\u202f.,]+)',
+            row, re.DOTALL | re.IGNORECASE
+        )
+        price = None
+        if price_m:
+            p_raw = price_m.group(1).replace('\xa0', '').replace('\u202f', '').replace(' ', '').replace(',', '.')
+            try:
+                price = float(re.sub(r'[^\d.]', '', p_raw))
+            except Exception:
+                pass
+        if label:
+            variants.append({'label': label, 'url': None, 'price': price})
+    if variants:
+        return variants
+
+    # 7. <option> fallback
     for m in re.finditer(
         r'<option\b[^>]*value=["\']([^"\']+)["\'][^>]*>([^<]{2,80})</option>',
         html, re.IGNORECASE
@@ -672,6 +710,39 @@ def _extract_price_for_variant(html: str, variant_label: str) -> Optional[Decima
                     return price
             except Exception:
                 pass
+
+    # data-testid="productVariant" tabulka (nutsman.cz)
+    _PREFIX_STRIP = re.compile(
+        r'^(?:Množství|Velikost|Balení|Hmotnost|Objem|Velikost\s+balení)\s*:\s*',
+        re.IGNORECASE
+    )
+    for row in re.findall(
+        r'<tr[^>]*data-testid=["\']productVariant["\'][^>]*>(.*?)</tr>',
+        html, re.DOTALL | re.IGNORECASE
+    ):
+        name_m = re.search(
+            r'data-testid=["\']productVariantName["\'][^>]*>\s*([^<]{1,120})',
+            row, re.IGNORECASE
+        )
+        if not name_m:
+            continue
+        raw_label = name_m.group(1).strip()
+        clean = _PREFIX_STRIP.sub('', raw_label).strip().lower()
+        # Match against both raw and stripped label
+        if label_lower in clean or clean in label_lower or label_lower in raw_label.lower():
+            price_m = re.search(
+                r'data-testid=["\']productVariantPrice["\'][^>]*>.*?<strong[^>]*>\s*'
+                r'([\d][\d\s\xa0\u202f.,]+)',
+                row, re.DOTALL | re.IGNORECASE
+            )
+            if price_m:
+                p_raw = re.sub(r'[^\d.,]', '', price_m.group(1)).replace(',', '.')
+                try:
+                    val = Decimal(p_raw)
+                    if 0 < val < 100000:
+                        return val
+                except Exception:
+                    pass
 
     # Fallback: search HTML for variant label + nearby price
     escaped = re.escape(variant_label)
