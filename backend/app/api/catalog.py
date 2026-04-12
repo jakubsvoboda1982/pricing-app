@@ -490,20 +490,10 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                         _must_have, _should_have, _must_not_have,
                     )
 
-                # Synchronizuj název, cenu, sklad a URL pro sledované produkty
+                # Synchronizuj název, cenu, sklad a URL pro manuálně sledované produkty
                 # (EAN matching + SKU/PRODUCTNO matching jako záloha)
                 _sync_by_ean(db, ean, name, price_vat, feed_sub.market, company.id, stock=_stock, thumbnail_url=_thumbnail, url_reference=_url_ref)
                 _sync_by_sku(db, product_code, name, price_vat, feed_sub.market, company.id, stock=_stock, thumbnail_url=_thumbnail, url_reference=_url_ref)
-
-                # Zajisti, že sledovaný Product existuje — vytvoří ho pokud neexistuje
-                if _cat_id:
-                    _ensure_tracked_product(
-                        db, _cat_id, company.id, name, ean, product_code, feed_sub.market,
-                        price_vat=price_vat, stock=_stock, thumbnail_url=_thumbnail,
-                        url_reference=_url_ref, canonical_attrs=canonical_attrs,
-                        target_weight_g=target_weight_g,
-                        must_have=_must_have, should_have=_should_have, must_not_have=_must_not_have,
-                    )
             except Exception:
                 # DŮLEŽITÉ: rollback nutný před dalším použitím session
                 # (bez rollback by SQLAlchemy odmítl další operace na broken transakci)
