@@ -4,6 +4,7 @@ from app.database import get_db
 from app.models import CatalogProduct, Company, FeedSubscription
 from app.schemas.catalog_product import CatalogProductResponse, CatalogProductCreate
 from app.utils.heureka_parser import HeureaFeedParser, HeurekaParsError
+from app.middleware.auth import verify_token
 from uuid import UUID
 import openpyxl
 from io import BytesIO
@@ -47,11 +48,24 @@ class FeedSubscriptionUpdate(BaseModel):
 # Pomocné funkce
 # ---------------------------------------------------------------------------
 
-def _get_company(db: Session) -> Company:
+def _get_company(db: Session, company_id=None) -> Company:
+    """Vrátí company podle company_id (z autentizace). Fallback na první company."""
+    if company_id:
+        company = db.query(Company).filter(Company.id == company_id).first()
+        if company:
+            return company
     company = db.query(Company).first()
     if not company:
         raise HTTPException(status_code=400, detail="Žádná společnost v systému")
     return company
+
+
+def _company_id_from_token(token_payload: dict, db: Session):
+    """Vrátí company_id přihlášeného uživatele."""
+    from app.models import User
+    user_id = token_payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    return user.company_id if user else None
 
 
 def _sync_tracked_price(db: Session, catalog_product_id, price_vat, market: str,
@@ -580,6 +594,7 @@ def _enrich_catalog_product(cp: CatalogProduct, db: Session) -> dict:
 
 @router.get("/products", response_model=list[CatalogProductResponse])
 def get_catalog_products(
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
     category: str = None,
     manufacturer: str = None,
@@ -595,7 +610,8 @@ def get_catalog_products(
     from app.models import Product as WatchedProduct
     from sqlalchemy import or_
 
-    query = db.query(CatalogProduct)
+    company_id = _company_id_from_token(token_payload, db)
+    query = db.query(CatalogProduct).filter(CatalogProduct.company_id == company_id) if company_id else db.query(CatalogProduct)
 
     if market:
         query = query.filter(CatalogProduct.market == market)
@@ -714,6 +730,7 @@ def get_manufacturers(db: Session = Depends(get_db)):
 @router.post("/import")
 def import_catalog_from_excel(
     file: UploadFile = File(...),
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """Importuj produkty z Excel souboru do katalogu"""
@@ -722,7 +739,7 @@ def import_catalog_from_excel(
         wb = openpyxl.load_workbook(BytesIO(contents))
         ws = wb.active
 
-        company = _get_company(db)
+        company = _get_company(db, _company_id_from_token(token_payload, db))
 
         imported_count = 0
         skipped_count = 0
@@ -804,6 +821,7 @@ async def import_catalog_from_heureka(
     file: UploadFile = File(...),
     market: str = Query("CZ", description="CZ nebo SK"),
     merge_existing: bool = Query(False, description="Sloučit s existujícími produkty"),
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """
@@ -824,7 +842,7 @@ async def import_catalog_from_heureka(
             detail = "; ".join(str(e.get('errors', e)) for e in errors[:3])
             raise HTTPException(status_code=400, detail=f"Chyba při parsování XML: {detail}")
 
-        company = _get_company(db)
+        company = _get_company(db, _company_id_from_token(token_payload, db))
 
         imported_count = 0
         skipped_count = 0
@@ -905,6 +923,7 @@ async def import_catalog_from_heureka(
 @router.post("/import-url")
 async def import_product_from_url(
     payload: ImportUrlRequest,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """
@@ -918,7 +937,7 @@ async def import_product_from_url(
     if not url.startswith("http"):
         raise HTTPException(status_code=400, detail="URL musí začínat http:// nebo https://")
 
-    company = _get_company(db)
+    company = _get_company(db, _company_id_from_token(token_payload, db))
 
     # Pokus o načtení titulku stránky
     fetched_name = payload.name
@@ -1036,9 +1055,12 @@ async def import_product_from_url(
 # ---------------------------------------------------------------------------
 
 @router.get("/feeds")
-def get_feed_subscriptions(db: Session = Depends(get_db)):
+def get_feed_subscriptions(
+    token_payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
     """Vrať seznam všech feed subscriptions"""
-    company = _get_company(db)
+    company = _get_company(db, _company_id_from_token(token_payload, db))
     feeds = db.query(FeedSubscription).filter(
         FeedSubscription.company_id == company.id
     ).order_by(FeedSubscription.created_at.desc()).all()
@@ -1048,10 +1070,11 @@ def get_feed_subscriptions(db: Session = Depends(get_db)):
 @router.post("/feeds")
 def create_feed_subscription(
     payload: FeedSubscriptionCreate,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """Přidej nový XML feed ke sledování"""
-    company = _get_company(db)
+    company = _get_company(db, _company_id_from_token(token_payload, db))
 
     if payload.market not in ["CZ", "SK"]:
         raise HTTPException(status_code=400, detail="Market musí být 'CZ' nebo 'SK'")
@@ -1082,10 +1105,11 @@ def create_feed_subscription(
 def update_feed_subscription(
     feed_id: UUID,
     payload: FeedSubscriptionUpdate,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """Uprav feed subscription"""
-    company = _get_company(db)
+    company = _get_company(db, _company_id_from_token(token_payload, db))
     feed = db.query(FeedSubscription).filter(
         FeedSubscription.id == feed_id,
         FeedSubscription.company_id == company.id
@@ -1112,10 +1136,11 @@ def update_feed_subscription(
 @router.delete("/feeds/{feed_id}")
 def delete_feed_subscription(
     feed_id: UUID,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """Smaž feed subscription"""
-    company = _get_company(db)
+    company = _get_company(db, _company_id_from_token(token_payload, db))
     feed = db.query(FeedSubscription).filter(
         FeedSubscription.id == feed_id,
         FeedSubscription.company_id == company.id
@@ -1131,10 +1156,11 @@ def delete_feed_subscription(
 @router.post("/feeds/{feed_id}/fetch")
 async def trigger_feed_fetch(
     feed_id: UUID,
+    token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
     """Ručně spusť načtení feedu"""
-    company = _get_company(db)
+    company = _get_company(db, _company_id_from_token(token_payload, db))
     feed = db.query(FeedSubscription).filter(
         FeedSubscription.id == feed_id,
         FeedSubscription.company_id == company.id
