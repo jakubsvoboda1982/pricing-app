@@ -599,6 +599,7 @@ def get_catalog_products(
         query = query.filter(
             CatalogProduct.name.ilike(f"%{search}%") |
             CatalogProduct.ean.ilike(f"%{search}%") |
+            CatalogProduct.product_code.ilike(f"%{search}%") |
             CatalogProduct.category.ilike(f"%{search}%") |
             CatalogProduct.manufacturer.ilike(f"%{search}%")
         )
