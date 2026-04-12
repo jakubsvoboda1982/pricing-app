@@ -334,15 +334,13 @@ def _ensure_tracked_product(
 
 
 def _find_existing_product(db: Session, ean: Optional[str], product_code: Optional[str], market: str, company_id) -> Optional[CatalogProduct]:
-    """Najdi existující produkt podle EAN nebo PRODUCTNO"""
-    if ean:
-        existing = db.query(CatalogProduct).filter(
-            CatalogProduct.ean == ean,
-            CatalogProduct.market == market,
-            CatalogProduct.company_id == company_id
-        ).first()
-        if existing:
-            return existing
+    """
+    Najdi existující CatalogProduct.
+    Priorita: product_code (specifičtější) → EAN (fallback).
+    Pokud matchujeme přes EAN ale product_code se liší, nepovažujeme za shodu —
+    jinak by dvě různé položky sdílející stejný EAN přepisovaly ten samý záznam.
+    """
+    # 1. Primárně hledej přes product_code (PRODUCTNO) — nejpřesnější
     if product_code:
         existing = db.query(CatalogProduct).filter(
             CatalogProduct.product_code == product_code,
@@ -351,6 +349,21 @@ def _find_existing_product(db: Session, ean: Optional[str], product_code: Option
         ).first()
         if existing:
             return existing
+
+    # 2. Fallback přes EAN
+    if ean:
+        existing = db.query(CatalogProduct).filter(
+            CatalogProduct.ean == ean,
+            CatalogProduct.market == market,
+            CatalogProduct.company_id == company_id
+        ).first()
+        if existing:
+            # Pokud oba záznamy mají odlišný product_code, jde o JINÉ produkty
+            # se shodným EAN (chyba v datech feedu) — nevracej shodu
+            if product_code and existing.product_code and existing.product_code != product_code:
+                return None
+            return existing
+
     return None
 
 
@@ -451,7 +464,7 @@ async def _fetch_and_import_feed(feed_sub: FeedSubscription, db: Session):
                         url_reference=_url_ref,
                         imported_from=product_data.get('imported_from'),
                         is_active=True,
-                        catalog_identifier=f"{company.id}_{ean}_{feed_sub.market}" if ean else None
+                        catalog_identifier=f"{company.id}_{product_code}" if product_code else (f"{company.id}_{ean}_{feed_sub.market}" if ean else None)
                     )
                     db.add(new_cat)
                     db.commit()
