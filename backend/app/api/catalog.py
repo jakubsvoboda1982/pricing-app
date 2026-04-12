@@ -576,18 +576,17 @@ def get_catalog_products(
     min_price: float = Query(None, description="Minimální cena s DPH"),
     max_price: float = Query(None, description="Maximální cena s DPH"),
     skip: int = 0,
-    limit: int = Query(200, le=1000, description="Max výsledků (default 200, max 1000)"),
+    limit: int = Query(10000, description="Max výsledků (default=vše)"),
 ):
     """Získej produkty z katalogu s filtrem a obohacenými daty"""
     from app.models import Product as WatchedProduct
+    from sqlalchemy import or_
 
     query = db.query(CatalogProduct)
 
     if market:
         query = query.filter(CatalogProduct.market == market)
     if category:
-        # Přesná shoda NEBO hierarchická kategorie končící na "| category" (Heureka CZ formát)
-        from sqlalchemy import or_
         query = query.filter(
             or_(
                 CatalogProduct.category == category,
@@ -619,22 +618,47 @@ def get_catalog_products(
     if not products:
         return []
 
-    # Single batch query for all watched products — O(1) instead of O(N)
+    # Batch query: match watched products via catalog_product_id OR EAN (fallback)
     catalog_ids = [p.id for p in products]
-    watched_rows = db.query(
+    catalog_eans = [p.ean for p in products if p.ean]
+
+    # 1) Primární: propojení přes catalog_product_id
+    watched_by_cat = db.query(
         WatchedProduct.catalog_product_id,
         WatchedProduct.id,
         WatchedProduct.competitor_urls,
     ).filter(WatchedProduct.catalog_product_id.in_(catalog_ids)).all()
 
     watched_map: dict = {}
-    for row in watched_rows:
+    for row in watched_by_cat:
         raw_urls = row.competitor_urls or []
         competitor_urls = [
             {"url": u.get("url", ""), "name": u.get("name", ""), "market": u.get("market", "CZ")}
             for u in raw_urls if isinstance(u, dict) and u.get("url")
         ]
         watched_map[str(row.catalog_product_id)] = (row.id, competitor_urls)
+
+    # 2) Fallback: propojení přes EAN (pro starší produkty bez catalog_product_id)
+    if catalog_eans:
+        watched_by_ean = db.query(
+            WatchedProduct.ean,
+            WatchedProduct.id,
+            WatchedProduct.competitor_urls,
+        ).filter(
+            WatchedProduct.ean.in_(catalog_eans),
+            WatchedProduct.catalog_product_id.is_(None),  # již zpracované přeskočíme
+        ).all()
+
+        ean_to_cat_id = {p.ean: str(p.id) for p in products if p.ean}
+        for row in watched_by_ean:
+            cat_id = ean_to_cat_id.get(row.ean)
+            if cat_id and cat_id not in watched_map:
+                raw_urls = row.competitor_urls or []
+                competitor_urls = [
+                    {"url": u.get("url", ""), "name": u.get("name", ""), "market": u.get("market", "CZ")}
+                    for u in raw_urls if isinstance(u, dict) and u.get("url")
+                ]
+                watched_map[cat_id] = (row.id, competitor_urls)
 
     return [CatalogProductResponse(**_serialize_catalog_product(p, watched_map)) for p in products]
 

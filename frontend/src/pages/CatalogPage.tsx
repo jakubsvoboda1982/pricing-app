@@ -130,8 +130,7 @@ export default function CatalogPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkAdding, setBulkAdding] = useState(false)
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
-  // Pagination
-  const [limit, setLimit] = useState(200)
+  const limit = 10000  // Načti vše najednou
 
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -172,12 +171,11 @@ export default function CatalogPage() {
 
   const priceRange = PRICE_RANGES[priceRangeIdx]
 
-  // Reset limit when filters change
-  const resetLimit = () => setLimit(200)
+  const resetLimit = () => {}  // Limit je fixní, reset není potřeba
 
   // Products — server-side filters; weight is client-side
   const { data: products = [], isLoading } = useQuery<CatalogProduct[]>({
-    queryKey: ['catalogProducts', selectedCategory, selectedManufacturer, searchTerm, selectedMarket, stockFilter, priceRangeIdx, limit],
+    queryKey: ['catalogProducts', selectedCategory, selectedManufacturer, searchTerm, selectedMarket, stockFilter, priceRangeIdx],
     queryFn: async () => {
       const params = new URLSearchParams()
       if (selectedCategory) params.append('category', selectedCategory)
@@ -378,7 +376,7 @@ export default function CatalogPage() {
           <p className="text-sm text-gray-500 mt-0.5">
             {isLoading
               ? 'Načítám...'
-              : `${sorted.length}${sorted.length !== products.length ? ` z ${products.length}` : ''} produktů${products.length >= limit ? ` (prvních ${limit})` : ''} · Vyber které chceš sledovat`}
+              : `${sorted.length}${sorted.length !== products.length ? ` z ${products.length}` : ''} produktů · Vyber které chceš sledovat`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -917,20 +915,6 @@ export default function CatalogPage() {
             })}
           </div>
 
-          {/* Load more / truncation notice */}
-          {products.length >= limit && (
-            <div className="px-4 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50">
-              <p className="text-xs text-gray-500">
-                Zobrazeno prvních <strong>{products.length}</strong> produktů — upřesněte hledání nebo načtěte více.
-              </p>
-              <button
-                onClick={() => setLimit(l => Math.min(l + 200, 1000))}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition"
-              >
-                Načíst dalších 200
-              </button>
-            </div>
-          )}
         </div>
       )}
     </div>
