@@ -188,23 +188,11 @@ def _ensure_schema():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_hash VARCHAR",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_expires_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE competitor_product_prices ADD COLUMN IF NOT EXISTS variant_label VARCHAR(200)",
-        # Fix FK in competitor_price_history: must reference competitor_product_prices, not competitor_prices
-        # Step 1: Delete orphaned history rows that reference non-existent competitor_product_prices
-        """DELETE FROM competitor_price_history
-           WHERE competitor_price_id NOT IN (
-               SELECT id FROM competitor_product_prices
-           )""",
-        # Step 2: Drop the old/wrong constraint (works even if it doesn't exist)
-        "ALTER TABLE competitor_price_history DROP CONSTRAINT IF EXISTS competitor_price_history_competitor_price_id_fkey",
-        # Step 3: Recreate constraint pointing to the correct table
-        """ALTER TABLE competitor_price_history
-               ADD CONSTRAINT competitor_price_history_competitor_price_id_fkey
-               FOREIGN KEY (competitor_price_id)
-               REFERENCES competitor_product_prices(id)
-               ON DELETE CASCADE""",
     ]
     try:
         with engine.connect() as conn:
+            # Nastav krátký lock timeout aby ALTER TABLE nezablokoval startup
+            conn.execute(text("SET lock_timeout = '5s'"))
             for stmt in stmts:
                 conn.execute(text(stmt))
             conn.commit()
