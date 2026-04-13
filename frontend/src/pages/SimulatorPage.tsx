@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   TrendingUp, TrendingDown, BarChart2, DollarSign,
-  ShoppingCart, Sliders, Users, Minus,
+  ShoppingCart, Sliders, CheckCircle, ArrowRight, Loader2,
 } from 'lucide-react'
 import { API_BASE_URL, authFetch } from '@/api/client'
 
@@ -46,6 +46,7 @@ function calcResult(basePrice: number, baseSales: number, baseCost: number, newP
 
 export default function SimulatorPage() {
   const location = useLocation()
+  const navigate = useNavigate()
   const state = (location.state as any) ?? {}
 
   const [productId, setProductId] = useState<string | null>(state.selectedProductId || null)
@@ -54,17 +55,50 @@ export default function SimulatorPage() {
   const [customDelta, setCustomDelta] = useState(0)
   const [competitorDrop, setCompetitorDrop] = useState(10)
   const [costIncrease, setCostIncrease] = useState(10)
+  const [applyLoading, setApplyLoading] = useState(false)
+  const [applyResult, setApplyResult] = useState<{ ok: boolean; recId?: string; message?: string } | null>(null)
 
   const { data: products = FALLBACK, isLoading } = useQuery({
     queryKey: ['simulatorProducts'],
     queryFn: async () => {
       try {
-        const r = await authFetch(`${API_BASE_URL}/simulator/products`)
+        const r = await authFetch(`${API_BASE_URL}/simulator/products`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
+        })
         if (!r.ok) throw new Error()
-        return await r.json() as Product[]
+        const data = await r.json() as Product[]
+        return data.length > 0 ? data : FALLBACK
       } catch { return FALLBACK }
     },
   })
+
+  const handleApplyRecommendation = async () => {
+    setApplyLoading(true)
+    setApplyResult(null)
+    try {
+      const r = await authFetch(`${API_BASE_URL}/simulator/apply-recommendation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({
+          product_id: activeId,
+          new_price_with_vat: active.newPrice,
+          scenario: tab,
+          revenue_change_pct: active.revenueChangePct,
+          elasticity,
+        }),
+      })
+      if (!r.ok) throw new Error('Chyba serveru')
+      const data = await r.json()
+      setApplyResult({ ok: true, recId: data.id, message: data.message })
+    } catch (e: any) {
+      setApplyResult({ ok: false, message: e?.message || 'Nepodařilo se uložit doporučení' })
+    } finally {
+      setApplyLoading(false)
+    }
+  }
 
   const activeId = productId || products[0]?.id || FALLBACK[0].id
   const raw = products.find(p => p.id === activeId) || products[0] || FALLBACK[0]
@@ -347,7 +381,7 @@ export default function SimulatorPage() {
             </div>
           </div>
 
-          {/* Recommendation */}
+          {/* Recommendation + Apply button */}
           <div className={`rounded-xl border px-4 py-3.5 text-sm ${
             revBig ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
             : revUp ? 'bg-blue-50 border-blue-200 text-blue-800'
@@ -357,6 +391,54 @@ export default function SimulatorPage() {
             <p>{revBig ? 'Strategie výrazně zvyšuje příjem — zvažte implementaci.'
               : revUp ? 'Malý nárůst příjmu. Zkuste jinou kombinaci parametrů.'
               : 'Tato strategie snižuje příjem. Nedoporučuji ji implementovat.'}</p>
+          </div>
+
+          {/* Apply as recommendation */}
+          <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-800">Použít jako doporučenou cenu</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Uloží <span className="font-mono font-semibold text-blue-700">{active.newPrice.toFixed(0)} Kč</span> jako čekající doporučení v Detailu produktu
+                </p>
+              </div>
+              <button
+                onClick={handleApplyRecommendation}
+                disabled={applyLoading}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  applyLoading
+                    ? 'bg-gray-100 text-gray-400 cursor-wait'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`}
+              >
+                {applyLoading
+                  ? <><Loader2 size={14} className="animate-spin" /> Ukládám…</>
+                  : <><CheckCircle size={14} /> Potvrdit simulaci</>
+                }
+              </button>
+            </div>
+
+            {/* Result feedback */}
+            {applyResult && (
+              <div className={`flex items-center justify-between rounded-lg px-3 py-2.5 text-sm ${
+                applyResult.ok
+                  ? 'bg-green-50 border border-green-200 text-green-800'
+                  : 'bg-red-50 border border-red-200 text-red-700'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <CheckCircle size={14} className={applyResult.ok ? 'text-green-600' : 'text-red-500'} />
+                  <span>{applyResult.ok ? 'Doporučení uloženo a čeká na schválení.' : applyResult.message}</span>
+                </div>
+                {applyResult.ok && (
+                  <button
+                    onClick={() => navigate(`/products/${activeId}`)}
+                    className="flex items-center gap-1 text-xs font-semibold text-green-700 hover:underline ml-3 shrink-0"
+                  >
+                    Otevřít detail <ArrowRight size={12} />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Scenario comparison */}

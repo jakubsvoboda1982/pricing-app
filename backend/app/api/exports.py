@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Product, Price
+from app.models.recommendation import PriceRecommendation
 from app.middleware.auth import verify_token
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -13,18 +14,25 @@ from typing import Optional
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
-ALL_FIELDS = ['id', 'sku', 'name', 'category', 'description', 'current_price', 'old_price', 'created_at', 'updated_at']
+ALL_FIELDS = [
+    'id', 'sku', 'name', 'category', 'description',
+    'current_price', 'old_price',
+    'recommended_price', 'recommended_price_source',
+    'created_at', 'updated_at',
+]
 
 FIELD_LABELS = {
-    'id':            'Product ID',
-    'sku':           'SKU',
-    'name':          'Název',
-    'category':      'Kategorie',
-    'description':   'Popis',
-    'current_price': 'Aktuální cena',
-    'old_price':     'Stará cena',
-    'created_at':    'Vytvořeno',
-    'updated_at':    'Upraveno',
+    'id':                        'Product ID',
+    'sku':                       'SKU',
+    'name':                      'Název',
+    'category':                  'Kategorie',
+    'description':               'Popis',
+    'current_price':             'Aktuální cena',
+    'old_price':                 'Stará cena',
+    'recommended_price':         'Doporučená cena',
+    'recommended_price_source':  'Zdroj doporučení',
+    'created_at':                'Vytvořeno',
+    'updated_at':                'Upraveno',
 }
 
 
@@ -83,7 +91,28 @@ def _get_products(
     return products
 
 
-def _build_row(product, price_rec, fields: list) -> list:
+def _get_recommendation_map(db: Session, product_ids: list) -> dict:
+    """Načti nejnovější doporučení per produkt (pending nebo approved)."""
+    if not product_ids:
+        return {}
+    recs = (
+        db.query(PriceRecommendation)
+        .filter(
+            PriceRecommendation.product_id.in_(product_ids),
+            PriceRecommendation.status.in_(["pending", "approved"]),
+        )
+        .order_by(PriceRecommendation.product_id, PriceRecommendation.created_at.desc())
+        .all()
+    )
+    seen: dict = {}
+    for r in recs:
+        pid = str(r.product_id)
+        if pid not in seen:
+            seen[pid] = r
+    return seen
+
+
+def _build_row(product, price_rec, fields: list, rec=None) -> list:
     row = []
     for f in fields:
         if f == 'id':
@@ -100,6 +129,16 @@ def _build_row(product, price_rec, fields: list) -> list:
             row.append(float(price_rec.current_price) if price_rec and price_rec.current_price else '')
         elif f == 'old_price':
             row.append(float(price_rec.old_price) if price_rec and price_rec.old_price else '')
+        elif f == 'recommended_price':
+            row.append(float(rec.recommended_price_with_vat) if rec else '')
+        elif f == 'recommended_price_source':
+            if rec:
+                reasoning = rec.reasoning or {}
+                src = reasoning.get('source', '')
+                label = 'Simulátor' if src == 'simulator' else 'Doporučení cen'
+                row.append(f"{label} ({rec.status})")
+            else:
+                row.append('')
         elif f == 'created_at':
             row.append(product.created_at.strftime('%Y-%m-%d %H:%M') if getattr(product, 'created_at', None) else '')
         elif f == 'updated_at':
@@ -122,8 +161,10 @@ def _parse_params(
 ):
     selected = [f for f in (fields.split(',') if fields else ALL_FIELDS) if f in ALL_FIELDS] or ALL_FIELDS
     products = _get_products(db, category, market, min_price, max_price, search)
-    price_map = _get_price_map(db, [p.id for p in products])
-    return selected, products, price_map
+    product_ids = [p.id for p in products]
+    price_map = _get_price_map(db, product_ids)
+    rec_map = _get_recommendation_map(db, product_ids)
+    return selected, products, price_map, rec_map
 
 
 # ── XLSX ─────────────────────────────────────────────────────────────────────
@@ -139,7 +180,7 @@ def export_products_xlsx(
     token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    selected, products, price_map = _parse_params(fields, category, market, min_price, max_price, search, db)
+    selected, products, price_map, rec_map = _parse_params(fields, category, market, min_price, max_price, search, db)
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -156,7 +197,7 @@ def export_products_xlsx(
 
     # Data
     for product in products:
-        ws.append(_build_row(product, price_map.get(str(product.id)), selected))
+        ws.append(_build_row(product, price_map.get(str(product.id)), selected, rec_map.get(str(product.id))))
 
     # Šířky sloupců
     widths = {'id': 38, 'name': 30, 'description': 30}
@@ -187,13 +228,13 @@ def export_products_csv(
     token_payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    selected, products, price_map = _parse_params(fields, category, market, min_price, max_price, search, db)
+    selected, products, price_map, rec_map = _parse_params(fields, category, market, min_price, max_price, search, db)
 
     buf = io.StringIO()
     w = csv.writer(buf, quoting=csv.QUOTE_ALL)
     w.writerow([FIELD_LABELS.get(f, f) for f in selected])
     for product in products:
-        w.writerow(_build_row(product, price_map.get(str(product.id)), selected))
+        w.writerow(_build_row(product, price_map.get(str(product.id)), selected, rec_map.get(str(product.id))))
 
     content = buf.getvalue().encode('utf-8-sig')  # BOM pro Excel
     return StreamingResponse(

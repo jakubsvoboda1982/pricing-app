@@ -3,15 +3,17 @@ import { Download, FileText, Check, FileSpreadsheet, Filter, X } from 'lucide-re
 import { API_BASE_URL } from '@/api/client'
 
 const ALL_FIELDS = [
-  { id: 'id',            label: 'Product ID',   defaultChecked: true  },
-  { id: 'sku',           label: 'SKU',           defaultChecked: true  },
-  { id: 'name',          label: 'Název',         defaultChecked: true  },
-  { id: 'category',      label: 'Kategorie',     defaultChecked: true  },
-  { id: 'description',   label: 'Popis',         defaultChecked: true  },
-  { id: 'current_price', label: 'Aktuální cena', defaultChecked: true  },
-  { id: 'old_price',     label: 'Stará cena',    defaultChecked: false },
-  { id: 'created_at',    label: 'Vytvořeno',     defaultChecked: true  },
-  { id: 'updated_at',    label: 'Upraveno',      defaultChecked: true  },
+  { id: 'id',                       label: 'Product ID',          defaultChecked: true  },
+  { id: 'sku',                      label: 'SKU',                 defaultChecked: true  },
+  { id: 'name',                     label: 'Název',               defaultChecked: true  },
+  { id: 'category',                 label: 'Kategorie',           defaultChecked: true  },
+  { id: 'description',              label: 'Popis',               defaultChecked: true  },
+  { id: 'current_price',            label: 'Aktuální cena',       defaultChecked: true  },
+  { id: 'old_price',                label: 'Stará cena',          defaultChecked: false },
+  { id: 'recommended_price',        label: 'Doporučená cena',     defaultChecked: true  },
+  { id: 'recommended_price_source', label: 'Zdroj doporučení',   defaultChecked: false },
+  { id: 'created_at',               label: 'Vytvořeno',           defaultChecked: true  },
+  { id: 'updated_at',               label: 'Upraveno',            defaultChecked: true  },
 ]
 
 const MARKET_OPTIONS = [

@@ -590,6 +590,30 @@ export default function ProductDetailPage() {
     enabled: !!id,
   })
 
+  // Doporučená cena (ze Simulátoru nebo Doporučení cen)
+  interface RecommendationRecord {
+    id: string; product_id: string; recommended_price_with_vat: number
+    current_price_with_vat: number | null; margin_change_percent: number | null
+    expected_revenue_impact_percent: number | null; status: string
+    reasoning: { type?: string; source?: string; text?: string; scenario_label?: string } | null
+    created_at: string
+  }
+  const { data: productRecs = [], refetch: refetchRecs } = useQuery<RecommendationRecord[]>({
+    queryKey: ['product-recommendations', id],
+    queryFn: async () => {
+      try {
+        const res = await authFetch(`${API_BASE_URL}/recommendations`, { headers: authHeaders() })
+        if (!res.ok) return []
+        const all = await res.json() as RecommendationRecord[]
+        return all.filter(r => r.product_id === id && (r.status === 'pending' || r.status === 'approved'))
+      } catch { return [] }
+    },
+    enabled: !!id,
+  })
+  const latestRec = productRecs.length > 0
+    ? [...productRecs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+    : null
+
   // ── Mutations ────────────────────────────────────────────────────────────
 
   const setPriceMutation = useMutation({
@@ -1638,6 +1662,72 @@ export default function ProductDetailPage() {
                   </button>
                   <button onClick={() => setShowPricingForm(null)} className="text-gray-500 px-3 py-1.5 rounded-lg text-xs hover:bg-gray-100">Zrušit</button>
                 </div>
+              </div>
+            )}
+
+            {/* Doporučená cena banner (ze Simulátoru nebo Doporučení cen) */}
+            {latestRec && (
+              <div className={`mb-3 p-3.5 rounded-xl border flex items-center gap-3 ${
+                latestRec.status === 'approved'
+                  ? 'bg-green-50 border-green-200'
+                  : 'bg-blue-50 border-blue-200'
+              }`}>
+                <div className="shrink-0">
+                  {latestRec.reasoning?.source === 'simulator' ? (
+                    <span className="text-lg">🎯</span>
+                  ) : (
+                    <span className="text-lg">💡</span>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-gray-700">
+                    Doporučená cena
+                    <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${
+                      latestRec.status === 'approved'
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-blue-100 text-blue-700'
+                    }`}>
+                      {latestRec.status === 'approved' ? 'Schváleno' : 'Čeká na schválení'}
+                    </span>
+                  </p>
+                  <p className="text-base font-bold text-blue-700 mt-0.5">
+                    {latestRec.recommended_price_with_vat.toLocaleString('cs-CZ', { maximumFractionDigits: 0 })} Kč
+                    {latestRec.current_price_with_vat && (
+                      <span className={`ml-2 text-xs font-medium ${
+                        latestRec.recommended_price_with_vat > latestRec.current_price_with_vat
+                          ? 'text-emerald-600'
+                          : latestRec.recommended_price_with_vat < latestRec.current_price_with_vat
+                            ? 'text-red-500'
+                            : 'text-gray-400'
+                      }`}>
+                        {latestRec.recommended_price_with_vat > latestRec.current_price_with_vat ? '▲' : latestRec.recommended_price_with_vat < latestRec.current_price_with_vat ? '▼' : '='}{' '}
+                        {Math.abs(latestRec.recommended_price_with_vat - latestRec.current_price_with_vat).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })} Kč
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate mt-0.5">
+                    {latestRec.reasoning?.source === 'simulator'
+                      ? `Simulátor co-když • ${latestRec.reasoning?.scenario_label ?? ''}`
+                      : latestRec.reasoning?.text ?? 'Doporučení cen'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Použít doporučenou cenu ${latestRec.recommended_price_with_vat.toLocaleString('cs-CZ', { maximumFractionDigits: 0 })} Kč?`)) {
+                      // Schválit doporučení a uložit jako aktuální cenu
+                      authFetch(`${API_BASE_URL}/recommendations/${latestRec.id}/approve`, {
+                        method: 'POST',
+                        headers: authHeaders(),
+                      }).then(() => {
+                        refetchRecs()
+                        queryClient.invalidateQueries({ queryKey: ['product', id] })
+                      })
+                    }
+                  }}
+                  className="shrink-0 flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition"
+                >
+                  <CheckCircle size={12} /> Schválit
+                </button>
               </div>
             )}
 

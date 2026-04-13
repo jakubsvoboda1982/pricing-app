@@ -1,12 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Product, Price
+from app.models import Product, Price, User
+from app.models.recommendation import PriceRecommendation
 from app.middleware.auth import verify_token
 from uuid import UUID
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import desc
+from decimal import Decimal
+from datetime import datetime
 
 router = APIRouter(prefix="/api/simulator", tags=["simulator"])
 
@@ -23,14 +26,25 @@ class ScenarioRequest(BaseModel):
     margin_target: Optional[float] = None
 
 
-def _last_price(product_id, db: Session) -> Optional[float]:
+class ApplyRecommendationRequest(BaseModel):
+    product_id: str
+    new_price_with_vat: float
+    scenario: str = "custom"          # custom | competitor | cost
+    revenue_change_pct: Optional[float] = None
+    elasticity: Optional[float] = 1.0
+
+
+def _last_price(product_id, db: Session) -> tuple[Optional[float], str, str]:
+    """Vrátí (price_value, market, currency) z poslední záznamu ceny."""
     price = (
         db.query(Price)
-        .filter(Price.product_id == product_id, Price.market == "CZ")
+        .filter(Price.product_id == product_id)
         .order_by(Price.changed_at.desc())
         .first()
     )
-    return float(price.current_price) if price and price.current_price else None
+    if price and price.current_price:
+        return float(price.current_price), price.market or "CZ", price.currency or "CZK"
+    return None, "CZ", "CZK"
 
 
 def _calc(base_price: float, base_sales: int, base_margin: float,
@@ -66,14 +80,25 @@ def get_simulator_products(
     payload: dict = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    """Vrátí seznam produktů s reálnými cenami pro simulátor."""
-    products = db.query(Product).limit(200).all()
+    """Vrátí všechny sledované produkty s reálnými cenami pro simulátor."""
+    # Zjisti company_id z tokenu
+    try:
+        user_id = UUID(payload.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Neplatný token")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    company_id = user.company_id if user else None
+
+    # Vrať všechny sledované produkty pro danou company
+    query = db.query(Product)
+    if company_id:
+        query = query.filter(Product.company_id == company_id)
+    products = query.order_by(Product.name).all()
+
     result = []
     for p in products:
-        price_val = _last_price(p.id, db)
-        # Výchozí prodeje a marže (reálná data zatím nejsou k dispozici)
-        base_sales = 100
-        # Marže ze vstupní ceny, pokud je k dispozici
+        price_val, market, currency = _last_price(p.id, db)
         base_margin = 28.0
         if p.purchase_price_without_vat and price_val:
             cost_with_vat = float(p.purchase_price_without_vat) * 1.21
@@ -85,15 +110,85 @@ def get_simulator_products(
             "name": p.name or "Bez názvu",
             "base_price": price_val or 100.0,
             "base_margin": max(0.0, base_margin),
-            "base_sales": base_sales,
+            "base_sales": 100,
             "purchase_price_with_vat": (
                 round(float(p.purchase_price_without_vat) * 1.21, 2)
                 if p.purchase_price_without_vat else None
             ),
-            "market": price.market if price else "CZ",
-            "currency": price.currency if price else "CZK",
+            "market": market,
+            "currency": currency,
         })
     return result
+
+
+@router.post("/apply-recommendation")
+def apply_simulator_recommendation(
+    request: ApplyRecommendationRequest,
+    payload: dict = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Uloží výsledek simulace jako doporučení ceny s čekajícím stavem."""
+    try:
+        pid = UUID(request.product_id)
+        user_id = UUID(payload.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Neplatné ID produktu")
+
+    product = db.query(Product).filter(Product.id == pid).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Produkt nenalezen")
+
+    # Aktuální cena
+    price_val, _, _ = _last_price(pid, db)
+    current_price = price_val
+
+    new_price_with_vat = request.new_price_with_vat
+    new_price_without_vat = new_price_with_vat / 1.21
+
+    margin_change = (
+        (new_price_with_vat - current_price) / current_price * 100
+        if current_price else 0.0
+    )
+
+    scenario_labels = {
+        "custom": "Vlastní změna",
+        "competitor": "Reakce na konkurenci",
+        "cost": "Přenos nárůstu nákladů",
+    }
+
+    rec = PriceRecommendation(
+        company_id=product.company_id,
+        product_id=pid,
+        recommended_price_without_vat=Decimal(str(round(new_price_without_vat, 2))),
+        recommended_price_with_vat=Decimal(str(round(new_price_with_vat, 2))),
+        current_price_with_vat=Decimal(str(current_price)) if current_price else None,
+        margin_change_percent=Decimal(str(round(margin_change, 2))),
+        expected_revenue_impact_percent=Decimal(str(round(request.revenue_change_pct or 0.0, 2))),
+        reasoning={
+            "type": "simulator",
+            "source": "simulator",
+            "scenario": request.scenario,
+            "scenario_label": scenario_labels.get(request.scenario, request.scenario),
+            "text": f"Doporučení ze Simulátoru co-když ({scenario_labels.get(request.scenario, request.scenario)})",
+            "elasticity": request.elasticity,
+            "confidence": 0.75,
+            "current_price": current_price,
+            "revenue_change_pct": request.revenue_change_pct,
+        },
+        created_by=user_id,
+        status="pending",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    return {
+        "id": str(rec.id),
+        "product_id": str(rec.product_id),
+        "recommended_price_with_vat": float(rec.recommended_price_with_vat),
+        "status": rec.status,
+        "message": "Doporučení ze simulátoru uloženo a čeká na schválení.",
+    }
 
 
 @router.post("/calculate")
@@ -112,7 +207,8 @@ def calculate_simulation(
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
-    base_price = _last_price(pid, db) or 100.0
+    base_price, _, _ = _last_price(pid, db)
+    base_price = base_price or 100.0
     base_sales = 100
     purchase_cost_with_vat = (
         float(product.purchase_price_without_vat) * 1.21
@@ -124,24 +220,17 @@ def calculate_simulation(
 
     if request.scenario == "custom":
         new_price = base_price + (request.price_change or 0)
-
     elif request.scenario == "competitor_drop":
-        # Konkurence sníží cenu o X % → zákazníci přesunout k nim
-        # Naše reakce: snížit cenu o polovinu poklesu, aby jsme zůstali konkurenceschopní
         drop = request.competitor_drop_pct or 0
         new_price = base_price * (1 - drop / 100 * 0.5)
-
     elif request.scenario == "cost_increase":
-        # Náklady vzrostou o Y % → musíme přenést část na zákazníka
         increase = request.cost_increase_pct or 0
         if purchase_cost_with_vat:
             new_cost = purchase_cost_with_vat * (1 + increase / 100)
-            # Zachovej původní marži
             margin_ratio = base_price / purchase_cost_with_vat if purchase_cost_with_vat > 0 else 1.35
             new_price = new_cost * margin_ratio
         else:
             new_price = base_price * (1 + increase / 100 * 0.6)
-
     else:
         new_price = base_price
 
@@ -165,7 +254,8 @@ def compare_scenarios(
     if not product:
         raise HTTPException(status_code=404, detail="Produkt nenalezen")
 
-    base_price = _last_price(pid, db) or 100.0
+    base_price, _, _ = _last_price(pid, db)
+    base_price = base_price or 100.0
     base_sales = 100
     purchase_cost_with_vat = (
         float(product.purchase_price_without_vat) * 1.21
@@ -177,12 +267,9 @@ def compare_scenarios(
 
     elasticity = request.elasticity or 1.0
 
-    # Scénář 1: Vlastní změna
     s1_price = base_price + (request.price_change or 0)
-    # Scénář 2: Reakce na pokles konkurence
     drop = request.competitor_drop_pct or 0
     s2_price = base_price * (1 - drop / 100 * 0.5)
-    # Scénář 3: Přenos nárůstu nákladů
     cost_inc = request.cost_increase_pct or 0
     if purchase_cost_with_vat:
         new_cost = purchase_cost_with_vat * (1 + cost_inc / 100)
