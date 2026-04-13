@@ -785,11 +785,14 @@ async def scrape_competitor_price(url: str, variant_label: Optional[str] = None)
     return None
 
 
-async def preview_competitor_url(url: str) -> dict:
+async def preview_competitor_url(url: str, variant_label: Optional[str] = None) -> dict:
     """
     Fetch a competitor URL and return a structured preview:
     detected_name, detected_price, detected_currency, variants list.
     Used before saving a tracked URL so the user can confirm/select the right variant.
+
+    If variant_label is provided, detected_price is overridden with the variant-specific price.
+    Also tries to match via URL fragment (#vXXXX) in JSON-LD hasVariant.
     """
     html = await fetch_page_content(url)
     if not html:
@@ -808,6 +811,55 @@ async def preview_competitor_url(url: str) -> dict:
     currency = _currency_from_url(url)
     description = _extract_product_description(html)
     ingredients = _extract_product_ingredients(html)
+
+    # --- Varianta-aware price override ---
+    # 1. Pokud je variant_label zadán, zkus extrahovat cenu přímo z HTML
+    if variant_label:
+        vp = _extract_price_for_variant(html, variant_label)
+        if vp is not None:
+            price = vp
+        else:
+            # 2. Záloha: hledej v detekovaných variantách (některé obsahují ceny)
+            for v in variants:
+                vlabel = str(v.get('label', '')).lower()
+                if variant_label.lower() in vlabel or vlabel in variant_label.lower():
+                    if v.get('price') is not None:
+                        price = Decimal(str(v['price']))
+                        break
+
+    # 3. Bez variant_label: zkus URL fragment (#vXXXX) pro Shoptet
+    if not variant_label:
+        fragment_m = re.search(r'#v(\d+)$', url)
+        if fragment_m:
+            frag_id = fragment_m.group(1)
+            # Hledej v JSON-LD hasVariant variantu s URL obsahující fragment
+            for block in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                                     html, re.DOTALL | re.IGNORECASE):
+                try:
+                    data = json.loads(block)
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if isinstance(item, dict) and '@graph' in item:
+                            items = items + item['@graph']
+                        if not isinstance(item, dict):
+                            continue
+                        for v in (item.get('hasVariant') or []):
+                            if not isinstance(v, dict):
+                                continue
+                            v_url = str(v.get('url') or '')
+                            if f'#v{frag_id}' in v_url or f'/v{frag_id}' in v_url:
+                                offer = v.get('offers') or {}
+                                if isinstance(offer, list):
+                                    offer = offer[0] if offer else {}
+                                p_raw = str(offer.get('price', '') or '').strip()
+                                if p_raw:
+                                    try:
+                                        price = Decimal(p_raw.replace(',', '.'))
+                                    except Exception:
+                                        pass
+                                break
+                except Exception:
+                    pass
 
     return {
         "ok": True,

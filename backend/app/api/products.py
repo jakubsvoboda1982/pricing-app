@@ -1039,19 +1039,8 @@ async def fetch_url_data(
     variant_labels = dict(getattr(product, 'own_market_variant_labels_json', None) or {})
     _variant_label = variant_labels.get(market)
 
-    # Scrape URL
-    result = await preview_competitor_url(url)
-
-    # If variant_label is set, override detected_price with variant-specific price
-    if _variant_label and result.get('variants'):
-        from app.competitor_scraper import _extract_price_for_variant
-        for v in result.get('variants', []):
-            vlabel = str(v.get('label', '')).lower()
-            if _variant_label.lower() in vlabel or vlabel in _variant_label.lower():
-                if v.get('price') is not None:
-                    result = dict(result)
-                    result['detected_price'] = v['price']
-                    break
+    # Scrape URL — předej variant_label pro správnou extrakci ceny varianty
+    result = await preview_competitor_url(url, variant_label=_variant_label)
 
     updated: dict = {}
 
