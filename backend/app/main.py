@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from app.config import get_settings
 from app.database import Base, engine, SessionLocal
 from app.models import Product
-from app.api import auth, products, users, audit, analytics, imports, exports, admin, opportunities, simulator, catalog, competitors, competitor_prices, baselinker, recommendations, watchlist, hero, seasonality, alerts, matching
+from app.api import auth, products, users, audit, analytics, imports, exports, admin, opportunities, simulator, catalog, competitors, competitor_prices, baselinker, recommendations, watchlist, hero, seasonality, alerts, matching, reports
 
 
 async def run_all_active_feeds():
@@ -34,6 +34,42 @@ async def update_competitor_prices_scheduled():
         print(f"[Scheduler] Aktualizace cen konkurence: {result['message']}")
     except Exception as e:
         print(f"[Scheduler] Chyba při aktualizaci cen konkurence: {e}")
+
+
+async def send_daily_price_report_scheduled():
+    """Odešli denní cenový report emailem (spouštěno schedulérem 06:00 UTC = 08:00 Praha)"""
+    from app.utils.report_generator import generate_price_change_report
+    from app.api.reports import _build_product_rows, _send_report_email
+    from datetime import date, timedelta
+    from app.models import Company
+
+    db = SessionLocal()
+    try:
+        companies = db.query(Company).all()
+        for company in companies:
+            try:
+                rows = _build_product_rows(db, company.id, days_back=1)
+                if not rows:
+                    continue
+                today = date.today()
+                pdf = generate_price_change_report(
+                    products=rows,
+                    period_from=today - timedelta(days=1),
+                    period_to=today,
+                    recipient_email='jak.svo1982@gmail.com',
+                    threshold_pct=5.0,
+                )
+                n_changes = sum(
+                    1 for p in rows
+                    if p['old_price'] and abs(p['my_price'] - p['old_price']) / p['old_price'] * 100 >= 5.0
+                )
+                await _send_report_email('jak.svo1982@gmail.com', pdf, today, n_changes)
+            except Exception as e:
+                print(f"[Scheduler] Chyba při odesílání cenového reportu pro {company.id}: {e}")
+    except Exception as e:
+        print(f"[Scheduler] Chyba při odesílání cenového reportu: {e}")
+    finally:
+        db.close()
 
 
 async def sync_baselinker_stock_scheduled():
@@ -125,9 +161,12 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(update_competitor_prices_scheduled, 'cron', hour=3, minute=0)
     # Spusť každý den v 04:00 UTC
     scheduler.add_job(sync_baselinker_stock_scheduled, 'cron', hour=4, minute=0)
+    # Cenový report — každý den v 06:00 UTC (8:00 Praha)
+    scheduler.add_job(send_daily_price_report_scheduled, 'cron', hour=6, minute=0)
     scheduler.start()
     print("[Scheduler] Denní načítání feedů aktivováno (02:00 UTC)")
     print("[Scheduler] Denní aktualizace cen konkurence aktivována (03:00 UTC)")
+    print("[Scheduler] Denní cenový report aktivován (06:00 UTC = 08:00 Praha)")
     print("[Scheduler] Denní synchronizace Baselinker skladů aktivována (04:00 UTC)")
 
     # Načti kurzy ČNB při startu (uloží do cache)
@@ -257,6 +296,7 @@ app.include_router(hero.router)
 app.include_router(seasonality.router)
 app.include_router(alerts.router)
 app.include_router(matching.router)
+app.include_router(reports.router)
 
 @app.get("/health")
 def health_check():

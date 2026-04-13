@@ -94,6 +94,73 @@ export default function ProductsPage() {
     return matchSearch && matchMarket
   })
 
+  // Seskupit produkty podle product_code (PRODUCTNO) — stejný produkt pro více trhů zobrazit jen 1x
+  interface GroupedProduct extends Product {
+    _grouped_ids: string[]
+    _markets: string[]
+  }
+  const groupedFiltered: GroupedProduct[] = (() => {
+    const groups = new Map<string, Product[]>()
+    const noCodeProducts: Product[] = []
+    for (const p of filtered) {
+      if (p.product_code) {
+        const key = p.product_code
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)!.push(p)
+      } else {
+        noCodeProducts.push(p)
+      }
+    }
+    const result: GroupedProduct[] = []
+    for (const group of groups.values()) {
+      // Primární produkt: preferuj CZ, pak první
+      const primary = group.find(p => (p.market || 'CZ') === 'CZ') ?? group[0]
+      // Sloučení prices_by_market a margin_by_market ze všech trhů
+      const mergedPrices: Record<string, { price: number | null; currency: string }> = { ...(primary.prices_by_market ?? {}) }
+      const mergedMargins: Record<string, number> = { ...(primary.margin_by_market ?? {}) }
+      let mergedStock = primary.stock_quantity
+      let mergedLowest = primary.lowest_competitor_price
+      let mergedCompUrls = [...(primary.competitor_urls ?? [])]
+      for (const p of group) {
+        if (p.id === primary.id) continue
+        // Přidej ceny z ostatních trhů
+        for (const [mkt, mktData] of Object.entries(p.prices_by_market ?? {})) {
+          if (!mergedPrices[mkt]) mergedPrices[mkt] = mktData
+        }
+        for (const [mkt, margin] of Object.entries(p.margin_by_market ?? {})) {
+          if (mergedMargins[mkt] == null) mergedMargins[mkt] = margin
+        }
+        // Sečti sklady
+        if (p.stock_quantity != null) {
+          mergedStock = (mergedStock ?? 0) + p.stock_quantity
+        }
+        // Nejnižší konkurent přes všechny trhy
+        if (p.lowest_competitor_price != null) {
+          if (mergedLowest == null || p.lowest_competitor_price < mergedLowest) {
+            mergedLowest = p.lowest_competitor_price
+          }
+        }
+        // Konkurentní URL
+        mergedCompUrls = [...mergedCompUrls, ...(p.competitor_urls ?? [])]
+      }
+      result.push({
+        ...primary,
+        prices_by_market: mergedPrices,
+        margin_by_market: mergedMargins,
+        stock_quantity: mergedStock,
+        lowest_competitor_price: mergedLowest,
+        competitor_urls: mergedCompUrls,
+        _grouped_ids: group.map(p => p.id),
+        _markets: group.map(p => p.market || 'CZ'),
+      })
+    }
+    // Produkty bez product_code přidej na konec (bez slučování)
+    for (const p of noCodeProducts) {
+      result.push({ ...p, _grouped_ids: [p.id], _markets: [p.market || 'CZ'] })
+    }
+    return result
+  })()
+
   const handleBulkLink = async (ids?: string[]) => {
     setLinkLoading(true)
     setLinkResult(null)
@@ -167,8 +234,8 @@ export default function ProductsPage() {
     })
   }
 
-  const allSelected = filtered.length > 0 && filtered.every(p => selectedIds.has(p.id))
-  const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(filtered.map(p => p.id)))
+  const allSelected = groupedFiltered.length > 0 && groupedFiltered.every(p => selectedIds.has(p.id))
+  const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(groupedFiltered.map(p => p.id)))
   const toggleOne = (id: string) => setSelectedIds(prev => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
   })
@@ -199,13 +266,38 @@ export default function ProductsPage() {
 
   // ── KPI strip ─────────────────────────────────────────────────────────────
   const all = products as Product[]
-  const withPrice    = all.filter(p => p.current_price != null || Object.keys(p.prices_by_market ?? {}).length > 0).length
-  const noPrice      = all.length - withPrice
+  // KPI pracuje nad seskupenými produkty (groupedFiltered není k dispozici tady, ale groupAll ano)
+  const groupAll = (() => {
+    const groups = new Map<string, Product[]>()
+    const noCode: Product[] = []
+    for (const p of all) {
+      if (p.product_code) {
+        if (!groups.has(p.product_code)) groups.set(p.product_code, [])
+        groups.get(p.product_code)!.push(p)
+      } else { noCode.push(p) }
+    }
+    const res: Product[] = []
+    for (const g of groups.values()) {
+      const primary = g.find(p => (p.market || 'CZ') === 'CZ') ?? g[0]
+      const mergedPrices: Record<string, { price: number | null; currency: string }> = { ...(primary.prices_by_market ?? {}) }
+      const mergedMargins: Record<string, number> = { ...(primary.margin_by_market ?? {}) }
+      for (const p of g) {
+        if (p.id === primary.id) continue
+        for (const [mkt, d] of Object.entries(p.prices_by_market ?? {})) { if (!mergedPrices[mkt]) mergedPrices[mkt] = d }
+        for (const [mkt, m] of Object.entries(p.margin_by_market ?? {})) { if (mergedMargins[mkt] == null) mergedMargins[mkt] = m }
+      }
+      res.push({ ...primary, prices_by_market: mergedPrices, margin_by_market: mergedMargins,
+        competitor_urls: g.flatMap(p => p.competitor_urls ?? []) })
+    }
+    return [...res, ...noCode]
+  })()
+  const withPrice    = groupAll.filter(p => p.current_price != null || Object.keys(p.prices_by_market ?? {}).length > 0).length
+  const noPrice      = groupAll.length - withPrice
   // KPI marže: použij relevantní trh (selectedMarket nebo first available)
-  const withMarginArr = all.map(p => getMargin(p, selectedMarket !== 'ALL' ? selectedMarket : undefined)).filter(m => m != null) as number[]
+  const withMarginArr = groupAll.map(p => getMargin(p, selectedMarket !== 'ALL' ? selectedMarket : undefined)).filter(m => m != null) as number[]
   const avgMargin    = withMarginArr.length ? withMarginArr.reduce((s, m) => s + m, 0) / withMarginArr.length : null
   const lowMargin    = withMarginArr.filter(m => m < 10).length
-  const noComp       = all.filter(p => !p.competitor_urls || p.competitor_urls.length === 0).length
+  const noComp       = groupAll.filter(p => !p.competitor_urls || p.competitor_urls.length === 0).length
 
   return (
     <div className="space-y-5">
@@ -304,11 +396,11 @@ export default function ProductsPage() {
       )}
 
       {/* ── KPI STRIP ──────────────────────────────────────────────────── */}
-      {all.length > 0 && (
+      {groupAll.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="bg-white border border-gray-200 rounded-xl p-4">
             <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1.5">Celkem</p>
-            <p className="text-2xl font-bold text-gray-900">{all.length}</p>
+            <p className="text-2xl font-bold text-gray-900">{groupAll.length}</p>
             <p className="text-xs text-gray-400 mt-0.5">{withPrice} s cenou · {noPrice} bez ceny</p>
           </div>
           <div className={`border border-gray-200 rounded-xl p-4 ${avgMargin != null && avgMargin < 10 ? 'bg-red-50' : avgMargin != null && avgMargin < 20 ? 'bg-yellow-50' : 'bg-white'}`}>
@@ -352,24 +444,24 @@ export default function ProductsPage() {
             </button>
           ))}
         </div>
-        {filtered.length !== all.length && (
-          <span className="text-xs text-gray-400">{filtered.length} z {all.length}</span>
+        {groupedFiltered.length !== groupAll.length && (
+          <span className="text-xs text-gray-400">{groupedFiltered.length} z {groupAll.length}</span>
         )}
       </div>
 
       {/* ── TABLE ──────────────────────────────────────────────────────── */}
       {isLoading ? (
         <div className="bg-white rounded-xl border border-gray-200 p-10 text-center text-sm text-gray-400">Načítám produkty...</div>
-      ) : filtered.length === 0 ? (
+      ) : groupedFiltered.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <Package size={44} className="mx-auto text-gray-200 mb-3" />
           <p className="text-gray-500 font-medium mb-1">
-            {all.length === 0 ? 'Zatím žádné sledované produkty' : 'Žádné výsledky hledání'}
+            {groupAll.length === 0 ? 'Zatím žádné sledované produkty' : 'Žádné výsledky hledání'}
           </p>
           <p className="text-sm text-gray-400 mb-5">
-            {all.length === 0 ? 'Přidejte produkty z katalogu nebo je importujte.' : 'Zkuste jiný výraz.'}
+            {groupAll.length === 0 ? 'Přidejte produkty z katalogu nebo je importujte.' : 'Zkuste jiný výraz.'}
           </p>
-          {all.length === 0 && (
+          {groupAll.length === 0 && (
             <button onClick={() => navigate('/catalog')}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
               Vybrat z katalogu
@@ -405,7 +497,7 @@ export default function ProductsPage() {
           </div>
 
           <div className="divide-y divide-gray-50">
-            {filtered.map(product => {
+            {groupedFiltered.map(product => {
               const isSelected = selectedIds.has(product.id)
               const isConfirmDelete = confirmDeleteId === product.id
               const cp = product.current_price != null ? Number(product.current_price) : null
@@ -453,9 +545,9 @@ export default function ProductsPage() {
                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                           {product.product_code && <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-mono">#{product.product_code}</span>}
                           {product.manufacturer && <span className="text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">{product.manufacturer}</span>}
-                          {product.market && (
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${product.market === 'CZ' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
-                              {product.market === 'CZ' ? '🇨🇿' : '🇸🇰'}
+                          {(product as any)._markets?.length > 1 && (
+                            <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                              {(product as any)._markets.join(' + ')}
                             </span>
                           )}
                         </div>
