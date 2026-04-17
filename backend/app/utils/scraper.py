@@ -1,7 +1,7 @@
 import re
 import asyncio
 from typing import Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 import aiohttp
 from datetime import datetime
 
@@ -89,7 +89,7 @@ async def scrape_competitor_metadata(url: str, timeout: int = 10) -> Dict:
         metadata['raw_data'] = html
 
         # Extrahuj metadata pomocí regex
-        _extract_meta_tags(html, metadata)
+        _extract_meta_tags(html, metadata, url)
         _extract_prices(html, metadata)
         _extract_contact_info(html, metadata)
 
@@ -105,8 +105,8 @@ async def scrape_competitor_metadata(url: str, timeout: int = 10) -> Dict:
     return metadata
 
 
-def _extract_meta_tags(html: str, metadata: Dict) -> None:
-    """Extrahuj Open Graph a meta tagy"""
+def _extract_meta_tags(html: str, metadata: Dict, base_url: str) -> None:
+    """Extrahuj Open Graph a meta tagy. Resolvuje relativní URL proti `base_url`."""
 
     # og:title nebo <title>
     og_title = re.search(r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
@@ -123,11 +123,14 @@ def _extract_meta_tags(html: str, metadata: Dict) -> None:
     # og:image pro logo
     og_image = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
     if og_image:
-        logo_url = og_image.group(1)
-        # Uprav relativní URL na absolutní
-        if logo_url.startswith('/'):
-            parsed = urlparse(html)  # Toto bude chyba - html je string, ne URL
-            # Oprav: potřebujeme orig_url
+        logo_url = og_image.group(1).strip()
+        # Resolve protocol-relative URLs (//cdn.example.com/img.png)
+        if logo_url.startswith('//'):
+            parsed = urlparse(base_url)
+            logo_url = f"{parsed.scheme}:{logo_url}"
+        # Resolve relative paths against the page URL
+        elif not logo_url.startswith('http'):
+            logo_url = urljoin(base_url, logo_url)
         metadata['logo_url'] = logo_url
 
     # og:description nebo meta description
