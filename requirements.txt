@@ -1,0 +1,3 @@
+# Vercel Python runtime instaluje závislosti z tohoto souboru v rootu.
+# Zdroj pravdy je backend/requirements.txt.
+-r backend/requirements.txt

@@ -1,5 +1,8 @@
+// Výchozí relativní `/api` = stejný origin jako frontend (žádné CORS).
+// V devu to obslouží Vite proxy (vite.config.ts → localhost:8000).
+// VITE_API_URL lze nastavit pro odkaz na samostatný backend.
 // Pokud je stránka servírována přes HTTPS, vždy použij HTTPS pro API (ochrana proti špatně nastavené env proměnné)
-const _rawApiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+const _rawApiUrl = import.meta.env.VITE_API_URL || '/api'
 export const API_BASE_URL =
   typeof window !== 'undefined' && window.location.protocol === 'https:'
     ? _rawApiUrl.replace(/^http:\/\//, 'https://')

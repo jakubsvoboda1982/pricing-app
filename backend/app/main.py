@@ -1,173 +1,35 @@
+import os
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.config import get_settings
-from app.database import Base, engine, SessionLocal
-from app.models import Product
-from app.api import auth, products, users, audit, analytics, imports, exports, admin, opportunities, simulator, catalog, competitors, competitor_prices, baselinker, recommendations, watchlist, hero, seasonality, alerts, matching, reports
-
-
-async def run_all_active_feeds():
-    """Načti všechny aktivní feedy (spouštěno schedulérem 1x denně)"""
-    from app.models import FeedSubscription
-    from app.api.catalog import _fetch_and_import_feed
-
-    db = SessionLocal()
-    try:
-        feeds = db.query(FeedSubscription).filter(FeedSubscription.is_active == True).all()
-        for feed in feeds:
-            try:
-                await _fetch_and_import_feed(feed, db)
-            except Exception as e:
-                print(f"[Scheduler] Chyba při načítání feedu {feed.name}: {e}")
-    finally:
-        db.close()
-
-
-async def update_competitor_prices_scheduled():
-    """Aktualizuj ceny konkurence (spouštěno schedulérem 1x týdně)"""
-    from app.competitor_scraper import update_all_competitor_prices
-
-    try:
-        result = await update_all_competitor_prices()
-        print(f"[Scheduler] Aktualizace cen konkurence: {result['message']}")
-    except Exception as e:
-        print(f"[Scheduler] Chyba při aktualizaci cen konkurence: {e}")
-
-
-async def send_daily_price_report_scheduled():
-    """Odešli denní cenový report emailem (spouštěno schedulérem 06:00 UTC = 08:00 Praha)"""
-    from app.utils.report_generator import generate_price_change_report
-    from app.api.reports import _build_product_rows, _send_report_email
-    from datetime import date, timedelta
-    from app.models import Company
-
-    db = SessionLocal()
-    try:
-        companies = db.query(Company).all()
-        for company in companies:
-            try:
-                rows = _build_product_rows(db, company.id, days_back=1)
-                if not rows:
-                    continue
-                today = date.today()
-                pdf = generate_price_change_report(
-                    products=rows,
-                    period_from=today - timedelta(days=1),
-                    period_to=today,
-                    recipient_email='jak.svo1982@gmail.com',
-                    threshold_pct=5.0,
-                )
-                n_changes = sum(
-                    1 for p in rows
-                    if p['old_price'] and abs(p['my_price'] - p['old_price']) / p['old_price'] * 100 >= 5.0
-                )
-                await _send_report_email('jak.svo1982@gmail.com', pdf, today, n_changes)
-            except Exception as e:
-                print(f"[Scheduler] Chyba při odesílání cenového reportu pro {company.id}: {e}")
-    except Exception as e:
-        print(f"[Scheduler] Chyba při odesílání cenového reportu: {e}")
-    finally:
-        db.close()
-
-
-async def sync_baselinker_stock_scheduled():
-    """Synchronizuj skladovost z Baselinker (spouštěno schedulérem 1x denně)"""
-    from app.models import BaselinkerConfig
-    from app.integrations.baselinker_client import BaselinkerClient
-
-    db = SessionLocal()
-    try:
-        configs = db.query(BaselinkerConfig).filter(BaselinkerConfig.is_active == True).all()
-        for config in configs:
-            if not config.inventory_id:
-                continue
-
-            try:
-                from app.models import BaselinkerProductMatch
-                client = BaselinkerClient(config.api_token)
-                bl_products = await client.get_all_products(config.inventory_id)
-
-                # Vytvoř mapy: bl_id → stock, sku → stock, ean → stock
-                bl_id_to_stock: dict = {}
-                sku_to_stock: dict = {}
-                ean_to_stock: dict = {}
-                for p in bl_products:
-                    bl_id = str(p.get("baselinker_id", ""))
-                    sku = (p.get("sku") or "").strip()
-                    ean = (p.get("ean") or "").strip()
-                    stock = p.get("stock", {})
-                    total_stock = int(sum(v for v in stock.values() if isinstance(v, (int, float))))
-                    if bl_id:
-                        bl_id_to_stock[bl_id] = total_stock
-                    if sku:
-                        sku_to_stock[sku] = total_stock
-                    if ean:
-                        ean_to_stock[ean] = total_stock
-
-                synced = 0
-                synced_product_ids: set = set()
-
-                # 1) Přímé propojení přes BaselinkerProductMatch (ruční párování)
-                matches = db.query(BaselinkerProductMatch).filter(
-                    BaselinkerProductMatch.company_id == config.company_id,
-                    BaselinkerProductMatch.product_id.isnot(None),
-                ).all()
-                for match in matches:
-                    bl_id = str(match.bl_product_id)
-                    if bl_id in bl_id_to_stock and match.product_id:
-                        product = db.query(Product).filter(Product.id == match.product_id).first()
-                        if product:
-                            product.stock_quantity = bl_id_to_stock[bl_id]
-                            synced += 1
-                            synced_product_ids.add(str(match.product_id))
-
-                # 2) Záložní párování přes EAN / SKU / product_code
-                all_products = db.query(Product).filter(Product.company_id == config.company_id).all()
-                for product in all_products:
-                    if str(product.id) in synced_product_ids:
-                        continue  # už spárováno přes match
-                    stock = None
-                    if product.ean and product.ean.strip() in ean_to_stock:
-                        stock = ean_to_stock[product.ean.strip()]
-                    elif product.product_code and product.product_code.strip() in sku_to_stock:
-                        stock = sku_to_stock[product.product_code.strip()]
-                    elif product.sku and product.sku.strip() in sku_to_stock:
-                        stock = sku_to_stock[product.sku.strip()]
-                    if stock is not None:
-                        product.stock_quantity = stock
-                        synced += 1
-
-                from datetime import datetime, timezone
-                config.last_sync_at = datetime.now(timezone.utc)
-                db.commit()
-
-                print(f"[Scheduler] Baselinker sync: {synced} produktů aktualizováno")
-            except Exception as e:
-                print(f"[Scheduler] Chyba při synchronizaci Baselinker: {e}")
-    finally:
-        db.close()
+from app.database import Base, engine
+from app.api import auth, products, users, audit, analytics, imports, exports, admin, opportunities, simulator, catalog, competitors, competitor_prices, baselinker, recommendations, watchlist, hero, seasonality, alerts, matching, reports, cron
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    scheduler = AsyncIOScheduler()
-    # Spusť každý den v 02:00 UTC
-    scheduler.add_job(run_all_active_feeds, 'cron', hour=2, minute=0)
-    # Spusť každý den v 03:00 UTC
-    scheduler.add_job(update_competitor_prices_scheduled, 'cron', hour=3, minute=0)
-    # Spusť každý den v 04:00 UTC
-    scheduler.add_job(sync_baselinker_stock_scheduled, 'cron', hour=4, minute=0)
-    # Cenový report — každý den v 06:00 UTC (8:00 Praha)
-    scheduler.add_job(send_daily_price_report_scheduled, 'cron', hour=6, minute=0)
-    scheduler.start()
-    print("[Scheduler] Denní načítání feedů aktivováno (02:00 UTC)")
-    print("[Scheduler] Denní aktualizace cen konkurence aktivována (03:00 UTC)")
-    print("[Scheduler] Denní cenový report aktivován (06:00 UTC = 08:00 Praha)")
-    print("[Scheduler] Denní synchronizace Baselinker skladů aktivována (04:00 UTC)")
+    # In-process scheduler je výchozí VYPNUTÝ — na Vercelu by stejně neběžel
+    # (efemérní funkce). Naplánované úlohy spouští Vercel Cron přes app.api.cron.
+    # Pro klasický dlouhoběžící server lze scheduler zapnout ENABLE_SCHEDULER=true.
+    scheduler = None
+    if os.getenv("ENABLE_SCHEDULER", "false").lower() == "true":
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from app.jobs import (
+            run_all_active_feeds,
+            update_competitor_prices_scheduled,
+            sync_baselinker_stock_scheduled,
+            send_daily_price_report_scheduled,
+        )
+        scheduler = AsyncIOScheduler()
+        scheduler.add_job(run_all_active_feeds, 'cron', hour=2, minute=0)
+        scheduler.add_job(update_competitor_prices_scheduled, 'cron', hour=3, minute=0)
+        scheduler.add_job(sync_baselinker_stock_scheduled, 'cron', hour=4, minute=0)
+        scheduler.add_job(send_daily_price_report_scheduled, 'cron', hour=6, minute=0)
+        scheduler.start()
+        print("[Scheduler] In-process scheduler aktivován (feedy 02:00, ceny 03:00, sklad 04:00, report 06:00 UTC)")
 
     # Načti kurzy ČNB při startu (uloží do cache)
     try:
@@ -185,11 +47,16 @@ async def lifespan(app: FastAPI):
 
     yield
     # Shutdown
-    scheduler.shutdown()
+    if scheduler is not None:
+        scheduler.shutdown()
 
 
-# Create all tables
-Base.metadata.create_all(bind=engine)
+# Inicializace schématu (tabulky, indexy, idempotentní migrace).
+# Na Vercelu běží při importu = při každém cold startu funkce, proto je VÝCHOZÍ
+# VYPNUTO (RUN_DB_INIT=false) — schéma se spravuje migracemi mimo request path.
+# Pro lokální vývoj / klasický server nech RUN_DB_INIT=true.
+_RUN_DB_INIT = os.getenv("RUN_DB_INIT", "true").lower() == "true"
+
 
 # Ensure performance indexes exist (idempotent — IF NOT EXISTS)
 def _ensure_indexes():
@@ -211,8 +78,6 @@ def _ensure_indexes():
             conn.commit()
     except Exception as e:
         print(f"[startup] Index creation warning: {e}")
-
-_ensure_indexes()
 
 
 # Apply idempotent schema migrations (ADD COLUMN IF NOT EXISTS)
@@ -238,7 +103,11 @@ def _ensure_schema():
     except Exception as e:
         print(f"[startup] Schema migration warning: {e}")
 
-_ensure_schema()
+
+if _RUN_DB_INIT:
+    Base.metadata.create_all(bind=engine)
+    _ensure_indexes()
+    _ensure_schema()
 
 app = FastAPI(
     title="Pricing Management Software",
@@ -297,6 +166,7 @@ app.include_router(seasonality.router)
 app.include_router(alerts.router)
 app.include_router(matching.router)
 app.include_router(reports.router)
+app.include_router(cron.router)
 
 @app.get("/health")
 def health_check():
